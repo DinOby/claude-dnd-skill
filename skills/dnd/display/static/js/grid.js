@@ -311,15 +311,24 @@
     if (shown && !was) render();   // measure only once the panel takes up space
   }
 
-  /* Viewport centre of a token (by id or name) — for overlays over a token. */
+  /* Token for a name as the DM writes it: id, name (any case) or the id derived from it. */
+  function findToken(tokens, ref) {
+    const low = String(ref || '').trim().toLowerCase();
+    if (!low) return null;
+    return (tokens || []).find(t => !t.hidden && (t.id === ref || String(t.name).toLowerCase() === low))
+      || (tokens || []).find(t => !t.hidden && t.id === turnId(ref)) || null;
+  }
+
+  /* Viewport position of a token (by id or name) — for overlays over a token.
+     {x, y} is the token's centre, {size} its width; null when it is not on screen. */
   function tokenCenter(ref) {
-    if (!map || !visible) return null;
-    const low = String(ref || '').toLowerCase();
-    const tok = (map.tokens || []).find(t => t.id === ref || String(t.name).toLowerCase() === low);
+    if (!map || !visible || typeof document === 'undefined') return null;
+    const tok = findToken(map.tokens, ref);
     const tEl = tok && tokenEls.get(tok.id);
     if (!tEl) return null;
     const r = tEl.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    if (!r.width) return null;
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, size: r.width };
   }
 
   const api = {
@@ -336,12 +345,18 @@
     _cellSize: cellSize,
     _spriteMode: spriteMode,
     _turnId: turnId,
+    _findToken: findToken,
     _spriteBackground: spriteBackground,
     _mergeImages: mergeImages,
     _images: () => images,
     _turn: () => turn,
   };
   window.GridView = api;
+
+  // Action overlays (vfx.js, loaded before this file) appear over the acting
+  // token while the grid is on screen; otherwise anchorFor returns null and
+  // they stay centred.
+  if (window.VfxOverlay && !window.VfxOverlay.anchorFor) window.VfxOverlay.anchorFor = tokenCenter;
 
   if (window.DisplayModules) {
     DisplayModules.register('grid', payload => {

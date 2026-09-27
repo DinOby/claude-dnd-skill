@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–16 fertig (Testsitzung mit echten Spielern offen), optional 17
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–17 fertig (Testsitzung mit echten Spielern offen)
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -378,3 +378,7 @@ Jeder Schritt ein eigener PR mit Tests.
     die Zug-Markierung erkennt auch die id. Befehlsfolge als Skript-Testlauf gegen das Display
     geprüft; eine Sitzung mit echten Spielern steht noch aus.
 17. *(Optional)* Einblendungen über der Figur der handelnden Person.
+    Umgesetzt: `grid.js` setzt `VfxOverlay.anchorFor`; eine Einblendung mit Namen
+    (`--vfx attack:Goblin 1`) erscheint bei sichtbarer Karte verkleinert über der Figur
+    (Größe nach Figur, Beschriftung darüber), sonst wie bisher in der Mitte. Namen werden wie bei
+    `--stat-move` aufgelöst (Name, id, `Goblin 2` ↔ `goblin-2`); verdeckte Figuren nie.

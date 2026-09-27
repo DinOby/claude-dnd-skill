@@ -20,7 +20,7 @@ JS = DISPLAY / "static" / "js"
 NODE_HARNESS = r"""
 const fs = require('fs');
 const vm = require('vm');
-const files = process.argv.slice(-3);
+const files = process.argv.slice(-4);
 
 const sandbox = { location: { search: '' }, URLSearchParams, console };
 sandbox.window = sandbox;
@@ -77,6 +77,14 @@ console.log(JSON.stringify({
   },
   banners: [S._bannerFor(travel), S._bannerFor(event), S._bannerFor(stationary), S._bannerFor(null),
             S._bannerFor({ mode: 'travel', travel: { to: 'X', day: 0, days_total: 3 } })],
+  vfxHook: w.VfxOverlay.anchorFor === G.tokenCenter,
+  anchorHidden: G.tokenCenter('Flerb'),
+  found: ['Flerb', 'flerb', 'FLERB', 'Goblin 2', 'goblin-2', 'nobody', ''].map(r => {
+    const t = G._findToken([{ id: 'flerb', name: 'Flerb' }, { id: 'goblin-2', name: 'Goblin' },
+                            { id: 'spy', name: 'Spion', hidden: true }], r);
+    return t ? t.id : null;
+  }),
+  hiddenNotFound: G._findToken([{ id: 'spy', name: 'Spion', hidden: true }], 'Spion'),
   turnIds: [G._turnId('Goblin 2'), G._turnId('Wirtin Hilde'), G._turnId('Ölaf'), G._turnId('')],
   sprite: [G._spriteMode('table'), G._spriteMode('Chair'), G._spriteMode('tree'), G._spriteMode('wall'), G._spriteMode('whatever')],
   spriteBg: [G._spriteBackground('/s/table.png', 'table'), G._spriteBackground('/s/a"b.png', 'tree')],
@@ -93,15 +101,21 @@ console.log(JSON.stringify({
 class GridScriptTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        proc = subprocess.run(["node", "-e", NODE_HARNESS, str(JS / "modules.js"), str(JS / "grid.js"),
-                               str(JS / "scene-mode.js")],
+        proc = subprocess.run(["node", "-e", NODE_HARNESS, str(JS / "modules.js"), str(JS / "vfx.js"),
+                               str(JS / "grid.js"), str(JS / "scene-mode.js")],
                               capture_output=True, text=True, encoding="utf-8", timeout=30)
         if proc.returncode != 0:
             raise AssertionError(f"node harness failed:\n{proc.stderr}")
         cls.out = json.loads(proc.stdout)
 
     def test_registration_order(self):
-        self.assertEqual(self.out["registered"], ["grid", "scene-mode"])   # grid state first, then the rule
+        self.assertEqual(self.out["registered"], ["vfx", "grid", "scene-mode"])   # page order: grid state before the rule
+
+    def test_overlays_anchor_on_tokens(self):
+        self.assertTrue(self.out["vfxHook"])                 # grid.js wires VfxOverlay.anchorFor
+        self.assertIsNone(self.out["anchorHidden"])          # grid not on screen → overlay stays centred
+        self.assertEqual(self.out["found"], ["flerb", "flerb", "flerb", "goblin-2", "goblin-2", None, None])
+        self.assertIsNone(self.out["hiddenNotFound"])        # the DM's hidden tokens never get an overlay
 
     def test_initials_and_labels(self):
         self.assertEqual(self.out["initials"], ["Fl", "WH", "G2", "G3", "Öl", "?", "AC"])

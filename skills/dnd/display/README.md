@@ -213,6 +213,7 @@ The Sound Effects toggle in the top-right corner of the display enables/disables
 Short icon animations for actions in the narration: attack, ranged, spell, heal, steal, sneak, defend, loot. `vfx.py` spots trigger phrases in DM narration (German and English out of the box) and broadcasts `{"vfx": {"effect", "actor", "source"}}`; `static/js/vfx.js` plays the animation on the main display. Phones never show overlays.
 
 - **Explicit:** `send.py --vfx attack:Flerb` fires an overlay before the narration, bypassing keyword spotting and its cooldown. A failed overlay only prints a warning.
+- **Over the token:** while the battle map is on screen, an overlay with a name (`attack:Goblin 1`) plays smaller over that token, caption above it; the name matches like `--stat-move` (token name or id). Without a map, or for a name not on it, it stays centred. Overlays spotted in the narration carry no name and stay centred.
 - **Trigger words** — `config/vfx-triggers.json`: phrases per language and effect, `cooldown_ms`, `max_per_chunk`. Phrase syntax: `word`, `two words`, `word +` (word plus any next word), `stem*` (any word starting with stem).
 - **Look** — `config/vfx-iconset.json`: icon, animation (`pop` `slash` `shoot` `pulse` `rise` `swipe` `fade`), duration, tint, caption per effect, plus a `fallback` effect for unknown names.
 - **Own icons:** put image files in `<data-root>/assets/vfx/` and reference them by file name from your iconset override; they take precedence over the bundled `icons/`.

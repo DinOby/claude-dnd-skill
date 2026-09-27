@@ -47,6 +47,12 @@
   filter: drop-shadow(0 0 18px color-mix(in srgb, var(--vfx-tint) 70%, transparent));
 }
 
+/* Over a token on the battle grid: sized to the token instead of the screen. */
+.vfx-card.vfx-anchored { flex-direction: column-reverse; gap: 0.25rem; }   /* caption above, clear of token names */
+.vfx-card.vfx-anchored .vfx-icon { width: var(--vfx-anchor, 110px); }
+.vfx-card.vfx-anchored .vfx-caption { font-size: clamp(0.7rem, 1.4vmin, 0.95rem); }
+.vfx-card.vfx-anchored::before { width: 150%; }
+
 .vfx-caption {
   font-family: 'Cinzel', Georgia, serif;
   font-size: clamp(0.95rem, 2.2vmin, 1.4rem);

@@ -7,9 +7,10 @@
  * Main display only (displayOnly): phones are controllers and stay quiet.
  * The "Action Overlays" toggle in the settings column is per browser.
  *
- * Extension point for the grid view: set VfxOverlay.anchorFor to a function
- * (actor) → {x, y} in viewport pixels (or null) to place an overlay over that
- * actor's token instead of the screen centre.
+ * Extension point for the grid view: VfxOverlay.anchorFor is a function
+ * (actor) → {x, y[, size]} in viewport pixels (or null). grid.js sets it, so
+ * an overlay with an actor appears — smaller — over that actor's token while
+ * the battle grid is on screen, and centred otherwise.
  */
 (function () {
   'use strict';
@@ -102,10 +103,14 @@
 
     const anchor = event.actor && typeof api.anchorFor === 'function' ? api.anchorFor(event.actor) : null;
     if (anchor && isFinite(anchor.x) && isFinite(anchor.y)) {
+      card.classList.add('vfx-anchored');
       card.style.position = 'fixed';
       card.style.left = anchor.x + 'px';
       card.style.top = anchor.y + 'px';
-      card.style.translate = '-50% -50%';
+      card.style.translate = '-50% -100%';  // card ends at the token's centre: caption on top, icon over the token
+      if (isFinite(anchor.size) && anchor.size > 0) {
+        card.style.setProperty('--vfx-anchor', Math.round(Math.min(160, Math.max(56, anchor.size * 2.2))) + 'px');
+      }
     }
 
     const img = document.createElement('img');
