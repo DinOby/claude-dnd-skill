@@ -306,3 +306,82 @@ class SendFlagTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NODE_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const [modulesPath, vfxPath] = process.argv.slice(-2);
+
+function load(search) {
+  const sandbox = { location: { search }, URLSearchParams, console };
+  sandbox.window = sandbox;
+  vm.runInNewContext(fs.readFileSync(modulesPath, 'utf8'), sandbox);
+  vm.runInNewContext(fs.readFileSync(vfxPath, 'utf8'), sandbox);   // no document → no DOM work
+  return sandbox.window;
+}
+
+const w = load('');
+const V = w.VfxOverlay;
+const set = {
+  fallback: 'attack',
+  effects: {
+    attack: { icon: 'attack.png', animation: 'slash', duration_ms: 900, tint: '#e05a4a', label: 'Attack' },
+    odd:    { icon: 'odd file.png', animation: 'explode', duration_ms: 99999, tint: 'red; x:y' },
+  },
+};
+const out = {
+  registered: w.DisplayModules.list(),
+  attack: V._resolveEffect(set, 'attack'),
+  unknown: V._resolveEffect(set, 'nope'),
+  odd: V._resolveEffect(set, 'odd'),
+  none: V._resolveEffect({ effects: {} }, 'attack'),
+  nullSet: V._resolveEffect(null, 'attack'),
+  caption: [V._caption({ label: 'Attack' }, 'Flerb'), V._caption({ label: 'Attack' }, null), V._caption({ label: '' }, null)],
+  queue: V._enqueue(V._enqueue(V._enqueue([], 1, 2), 2, 2), 3, 2),
+};
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipIf(__import__("shutil").which("node") is None, "node not installed")
+class OverlayScriptTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import subprocess
+        js = DISPLAY / "static" / "js"
+        proc = subprocess.run(["node", "-e", NODE_HARNESS, str(js / "modules.js"), str(js / "vfx.js")],
+                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+        if proc.returncode != 0:
+            raise AssertionError(f"node harness failed:\n{proc.stderr}")
+        cls.out = json.loads(proc.stdout)
+
+    def test_registers_with_dispatcher(self):
+        self.assertEqual(self.out["registered"], ["vfx"])
+
+    def test_resolves_look(self):
+        self.assertEqual(self.out["attack"], {"icon": "/vfx/icons/attack.png", "animation": "slash",
+                                              "duration": 900, "tint": "#e05a4a", "label": "Attack"})
+
+    def test_unknown_effect_uses_fallback(self):
+        self.assertEqual(self.out["unknown"], self.out["attack"])
+        self.assertIsNone(self.out["none"])
+        self.assertIsNone(self.out["nullSet"])
+
+    def test_untrusted_values_are_sanitised(self):
+        odd = self.out["odd"]
+        self.assertEqual(odd["icon"], "/vfx/icons/odd%20file.png")
+        self.assertEqual(odd["animation"], "pop")
+        self.assertEqual(odd["duration"], 10000)
+        self.assertEqual(odd["tint"], "#e8c05a")
+
+    def test_caption_and_queue(self):
+        self.assertEqual(self.out["caption"], ["Flerb · Attack", "Attack", ""])
+        self.assertEqual(self.out["queue"], [2, 3])
+
+    def test_index_loads_vfx_after_dispatcher_and_has_toggle(self):
+        html = (DISPLAY / "templates" / "index.html").read_text(encoding="utf-8")
+        self.assertLess(html.index('src="/static/js/modules.js"'), html.index('src="/static/js/vfx.js"'))
+        self.assertLess(html.index('src="/static/js/vfx.js"'), html.index("function connect()"))
+        self.assertIn('id="vfx-row"', html)
+        self.assertIn('id="vfx-track"', html)

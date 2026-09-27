@@ -3627,6 +3627,10 @@
     <span class="audio-label">Sound Effects</span>
     <div class="toggle-track" id="sfx-track"><div class="toggle-thumb"></div></div>
   </div>
+  <div class="audio-row" id="vfx-row" title="Short icon animations for actions in the narration (attack, spell, theft …)">
+    <span class="audio-label">Action Overlays</span>
+    <div class="toggle-track" id="vfx-track"><div class="toggle-thumb"></div></div>
+  </div>
   <div class="audio-row" id="verbosity-row" title="Narration length the DM targets each turn — shorter = faster turns">
     <span class="audio-label">Narration</span>
     <span class="vb-wrap">
@@ -3850,6 +3854,7 @@
 <!-- Feature modules: modules.js first, then one tag per feature, all before
      the main script (which opens the SSE stream). See static/js/modules.js. -->
 <script src="/static/js/modules.js"></script>
+<script src="/static/js/vfx.js"></script>
 
 <script>
 'use strict';

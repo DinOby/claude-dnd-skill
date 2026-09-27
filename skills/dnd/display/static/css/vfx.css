@@ -1,0 +1,126 @@
+/* vfx.css — action overlays (see static/js/vfx.js).
+ *
+ * One centred card per effect: glow in the effect's tint, the icon, and a
+ * small caption. Animation names map 1:1 to vfx-iconset.json "animation"
+ * values (vfx-anim-<name>); duration comes from --vfx-dur.
+ */
+
+#vfx-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;               /* above narration (4), below controls and drawers */
+  display: grid;
+  place-items: center;
+  padding-bottom: 18vh;     /* sit above the text column's lower half */
+}
+
+.vfx-card {
+  --vfx-tint: #e8c05a;
+  --vfx-dur: 1100ms;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  animation-duration: var(--vfx-dur);
+  animation-timing-function: cubic-bezier(.2, .8, .2, 1);
+  animation-fill-mode: both;
+}
+
+.vfx-card::before {         /* tinted glow */
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 170%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -58%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--vfx-tint) 55%, transparent) 0%, transparent 62%);
+  z-index: -1;
+}
+
+.vfx-icon {
+  width: min(26vmin, 230px);
+  height: auto;
+  filter: drop-shadow(0 0 18px color-mix(in srgb, var(--vfx-tint) 70%, transparent));
+}
+
+.vfx-caption {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: clamp(0.95rem, 2.2vmin, 1.4rem);
+  letter-spacing: 0.08em;
+  color: #f4e6c4;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 12px color-mix(in srgb, var(--vfx-tint) 60%, transparent);
+  white-space: nowrap;
+}
+
+:root[data-theme="light"] .vfx-caption { color: #3a2a12; text-shadow: 0 0 10px rgba(255, 248, 225, 0.9); }
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+
+.vfx-anim-pop   { animation-name: vfx-pop; }
+.vfx-anim-slash { animation-name: vfx-slash; }
+.vfx-anim-shoot { animation-name: vfx-shoot; }
+.vfx-anim-pulse { animation-name: vfx-pulse; }
+.vfx-anim-rise  { animation-name: vfx-rise; }
+.vfx-anim-swipe { animation-name: vfx-swipe; }
+.vfx-anim-fade  { animation-name: vfx-fade; }
+
+@keyframes vfx-pop {
+  0%   { opacity: 0; transform: scale(.4); }
+  20%  { opacity: 1; transform: scale(1.12); }
+  32%  { transform: scale(1); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+@keyframes vfx-slash {
+  0%   { opacity: 0; transform: translate(-14vmin, -8vmin) rotate(-28deg) scale(.7); }
+  22%  { opacity: 1; transform: translate(2vmin, 1vmin) rotate(6deg) scale(1.1); }
+  34%  { transform: translate(0, 0) rotate(0) scale(1); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+@keyframes vfx-shoot {
+  0%   { opacity: 0; transform: translateX(-30vmin) scale(.8); }
+  25%  { opacity: 1; transform: translateX(1.5vmin) scale(1.05); }
+  36%  { transform: translateX(0) scale(1); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(4vmin); }
+}
+@keyframes vfx-pulse {
+  0%   { opacity: 0; transform: scale(.6); }
+  20%  { opacity: 1; transform: scale(1.08); }
+  40%  { transform: scale(.97); }
+  60%  { transform: scale(1.06); }
+  80%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.2); }
+}
+@keyframes vfx-rise {
+  0%   { opacity: 0; transform: translateY(6vmin) scale(.9); }
+  25%  { opacity: 1; transform: translateY(0) scale(1); }
+  75%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-6vmin); }
+}
+@keyframes vfx-swipe {
+  0%   { opacity: 0; transform: translateX(18vmin) skewX(-12deg); }
+  25%  { opacity: 1; transform: translateX(0) skewX(0); }
+  70%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(-18vmin) skewX(12deg); }
+}
+@keyframes vfx-fade {
+  0%   { opacity: 0; filter: blur(6px); }
+  30%  { opacity: .9; filter: blur(0); }
+  70%  { opacity: .9; }
+  100% { opacity: 0; filter: blur(4px); }
+}
+
+/* Reduced motion: no movement, just a short fade in place. */
+@keyframes vfx-still {
+  0%, 100% { opacity: 0; }
+  20%, 75% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vfx-card[class*="vfx-anim-"] { animation-name: vfx-still; }
+}

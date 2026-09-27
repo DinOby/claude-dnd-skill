@@ -208,6 +208,18 @@ Requires `numpy`. If numpy is not installed the module degrades silently — WAV
 
 The Sound Effects toggle in the top-right corner of the display enables/disables SFX. The first click also satisfies the browser's autoplay policy for Web Audio.
 
+### Action overlays
+
+Short icon animations for actions in the narration: attack, ranged, spell, heal, steal, sneak, defend, loot. `vfx.py` spots trigger phrases in DM narration (German and English out of the box) and broadcasts `{"vfx": {"effect", "actor", "source"}}`; `static/js/vfx.js` plays the animation on the main display. Phones never show overlays.
+
+- **Explicit:** `send.py --vfx attack:Flerb` fires an overlay before the narration, bypassing keyword spotting and its cooldown. A failed overlay only prints a warning.
+- **Trigger words** — `config/vfx-triggers.json`: phrases per language and effect, `cooldown_ms`, `max_per_chunk`. Phrase syntax: `word`, `two words`, `word +` (word plus any next word), `stem*` (any word starting with stem).
+- **Look** — `config/vfx-iconset.json`: icon, animation (`pop` `slash` `shoot` `pulse` `rise` `swipe` `fade`), duration, tint, caption per effect, plus a `fallback` effect for unknown names.
+- **Own icons:** put image files in `<data-root>/assets/vfx/` and reference them by file name from your iconset override; they take precedence over the bundled `icons/`.
+- **Languages:** every language in the trigger file is active unless the campaign's `state.md` sets `vfx_languages: de`.
+
+The Action Overlays toggle in the settings column switches overlays per browser; `prefers-reduced-motion` reduces them to a short fade.
+
 ### Text rendering
 
 - DM output is sent chunk by chunk via `send.py` after each narration block
