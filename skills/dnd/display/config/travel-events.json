@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "_doc": "Random travel events rolled by `travel.py day` when the daily check (travel_event_chance in state.md, default 15 %) hits. Events under a terrain apply to that terrain; `any` applies everywhere. Each event is keyed by id: title (shown on the display), weight (relative chance), template (battle-map template for the event map), tokens (put on the template's spawn zones; count repeats one), hint (for the DM). Override in <data-root>/config/travel-events.json: add events by id, remove one with null. A terrain without events falls back to `any`, then to the Mythic event focus from oracle.py.",
+  "terrains": {
+    "road": {
+      "wegelagerer": {"title": "Wegelagerer an der Straße", "weight": 3, "template": "forest-road",
+                      "tokens": [{"name": "Bandit", "kind": "enemy", "count": 3}],
+                      "hint": "Eine umgestürzte Kutsche blockiert den Weg; die Räuber fordern Wegzoll."},
+      "haendlerzug": {"title": "Händlerzug", "weight": 2, "template": "forest-road",
+                      "tokens": [{"name": "Händler", "kind": "npc"}, {"name": "Stadtwache", "kind": "npc", "count": 2}, {"name": "Wagen", "kind": "object", "size": 2}],
+                      "hint": "Handel, Gerüchte über das Ziel, vielleicht eine Bitte um Begleitschutz."},
+      "patrouille": {"title": "Patrouille der Wache", "weight": 1, "template": "forest-road",
+                     "tokens": [{"name": "Stadtwache", "kind": "npc", "count": 3}],
+                     "hint": "Fragen nach Herkunft und Ziel; sucht jemanden, auf den die Gruppe passen könnte."}
+    },
+    "forest": {
+      "wolfsrudel": {"title": "Wolfsrudel am Waldrand", "weight": 3, "template": "forest-clearing",
+                     "tokens": [{"name": "Wolf", "kind": "enemy", "count": 3}],
+                     "hint": "Ausgehungert; weicht zurück, wenn zwei Wölfe fallen."},
+      "riesenspinnen": {"title": "Netze zwischen den Bäumen", "weight": 2, "template": "forest-clearing",
+                        "tokens": [{"name": "Riesenspinne", "kind": "enemy", "count": 2}],
+                        "hint": "Eingesponnene Beute hängt in den Netzen — vielleicht noch lebendig."},
+      "goblin-hinterhalt": {"title": "Goblin-Hinterhalt", "weight": 2, "template": "forest-road",
+                            "tokens": [{"name": "Goblin", "kind": "enemy", "count": 4}],
+                            "hint": "Stolperdraht über dem Weg, Bogenschützen im Gebüsch."}
+    },
+    "hills": {
+      "orkspaeher": {"title": "Ork-Späher auf dem Kamm", "weight": 2, "template": "ruins",
+                     "tokens": [{"name": "Ork", "kind": "enemy", "count": 2}],
+                     "hint": "Späher eines größeren Trupps; entkommt einer, folgt Verstärkung."},
+      "alte-ruine": {"title": "Verfallener Wachturm", "weight": 2, "template": "ruins",
+                     "tokens": [{"name": "Skelett", "kind": "enemy", "count": 3}],
+                     "hint": "Die Toten der alten Garnison halten noch Wache."}
+    },
+    "mountain": {
+      "steinschlag": {"title": "Steinschlag am Pass", "weight": 2, "template": "mountain-pass",
+                      "tokens": [],
+                      "hint": "Geschicklichkeitsrettungswurf SG 13, 2W10 Wuchtschaden; danach ist der Weg halb verschüttet."},
+      "oger": {"title": "Oger versperrt den Pass", "weight": 1, "template": "mountain-pass",
+               "tokens": [{"name": "Oger", "kind": "enemy", "size": 2}],
+               "hint": "Hungrig, nicht klug — lässt sich mit Futter oder einer List ablenken."}
+    },
+    "river": {
+      "brueckentroll": {"title": "Zoll an der Brücke", "weight": 2, "template": "bridge",
+                        "tokens": [{"name": "Troll", "kind": "enemy", "size": 2}],
+                        "hint": "Verlangt einen Zoll — Gold, ein Rätsel oder ein Kampf."},
+      "faehrmann": {"title": "Der Fährmann", "weight": 1, "template": "bridge",
+                    "tokens": [{"name": "Fährmann", "kind": "npc"}],
+                    "hint": "Die Brücke ist eingestürzt; der Fährmann weiß mehr, als er sagt."}
+    },
+    "plains": {
+      "gnollrotte": {"title": "Gnoll-Rotte", "weight": 2, "template": "camp",
+                     "tokens": [{"name": "Gnoll", "kind": "enemy", "count": 3}],
+                     "hint": "Greifen beim Nachtlager an."},
+      "reisende": {"title": "Reisende am Lagerfeuer", "weight": 2, "template": "camp",
+                   "tokens": [{"name": "Reisender", "kind": "npc", "count": 2}],
+                   "hint": "Teilen Essen und Neuigkeiten — einer von ihnen lügt."}
+    },
+    "swamp": {
+      "irrlichter": {"title": "Lichter im Nebel", "weight": 2, "template": "forest-clearing",
+                     "tokens": [{"name": "Zombie", "kind": "enemy", "count": 3}],
+                     "hint": "Die Lichter führen vom Weg ab, zu den Ertrunkenen."}
+    },
+    "any": {
+      "unwetter": {"title": "Unwetter zieht auf", "weight": 2, "template": "camp",
+                   "tokens": [],
+                   "hint": "Schutz suchen oder weiterziehen (Erschöpfung bei misslungenem Konstitutionswurf SG 12)."},
+      "kultisten": {"title": "Kultisten bei einem Ritual", "weight": 1, "template": "ruins",
+                    "tokens": [{"name": "Kultist", "kind": "enemy", "count": 3}],
+                    "hint": "Das Ritual ist halb vollendet — unterbrechen oder beobachten?"}
+    }
+  }
+}

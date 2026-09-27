@@ -23,6 +23,10 @@ for p in (str(DISPLAY), str(SKILL / "scripts")):
         sys.path.insert(0, p)
 
 import grid_map as gm  # noqa: E402
+import scene_state  # noqa: E402
+from asset_queue import PendingQueue  # noqa: E402
+from asset_store import AssetStore  # noqa: E402
+from tests.app_isolation import IsolatedApp  # noqa: E402
 
 
 def tavern(**extra) -> dict:
@@ -304,20 +308,20 @@ def _import_app():
     return mod
 
 
-class RouteTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.app = _import_app()
-        cls.app._token_ok = lambda: True
-        cls.client = cls.app.app.test_client()
+class RouteTests(IsolatedApp):
+    app_module_name = "_grid_app_under_test"
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         base = Path(self._tmp.name)
-        patcher = mock.patch.object(self.app, "_maps", gm.MapStore(str(base / "lib"), str(base / "camp")))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in (("_maps", gm.MapStore(str(base / "lib"), str(base / "camp"))),
+                            ("_scenes", scene_state.SceneStore(str(base / "camp" / "scene-state.json"))),
+                            ("_assets", AssetStore(global_root=str(base / "assets"))),
+                            ("_asset_queue", PendingQueue(str(base / "assets" / "pending-assets.json")))):
+            patcher = mock.patch.object(self.app, name, value)   # never touch the real campaign
+            patcher.start()
+            self.addCleanup(patcher.stop)
         # one main display and one phone
         self.main, self.phone = queue.Queue(), queue.Queue()
         clients = mock.patch.object(self.app, "_clients", [self.main, self.phone])
@@ -325,20 +329,29 @@ class RouteTests(unittest.TestCase):
         clients.start(); chars.start()
         self.addCleanup(clients.stop); self.addCleanup(chars.stop)
 
-    def post(self, body):
-        resp = self.client.post("/map", json=body)
+    def post(self, body, url="/map"):
+        resp = self.client.post(url, json=body)
         return resp.status_code, resp.get_json()
+
+    def drain(self, key):
+        """Messages of one kind sent to the main display (others are dropped)."""
+        out = []
+        while not self.main.empty():
+            msg = self.main.get_nowait()
+            if key in msg:
+                out.append(msg[key])
+        return out
 
     def test_set_patch_hide_reach_main_display_only(self):
         code, data = self.post({"map": tavern()})
         self.assertEqual((code, data["map_id"], data["rev"]), (200, "kessel-schankraum", 1))
-        self.assertEqual(self.main.get_nowait()["map"]["id"], "kessel-schankraum")
+        self.assertEqual(self.drain("map")[0]["id"], "kessel-schankraum")
         code, data = self.post({"patch": {"move": [{"id": "Flerb", "to": "B1"}]}})
         self.assertEqual((code, data["rev"]), (200, 2))
         self.assertEqual(data["warnings"], ["Flerb stands on wall at B1"])
-        self.assertEqual(self.main.get_nowait()["map_patch"]["move"], [{"id": "flerb", "x": 1, "y": 0}])
+        self.assertEqual(self.drain("map_patch")[0]["move"], [{"id": "flerb", "x": 1, "y": 0}])
         self.assertEqual(self.post({"hide": True})[0], 200)
-        self.assertEqual(self.main.get_nowait(), {"map": None})
+        self.assertEqual(self.drain("map"), [None])
         self.assertTrue(self.phone.empty())
         got = self.client.get("/map").get_json()
         self.assertEqual((got["map"], got["library"]), (None, ["kessel-schankraum"]))
@@ -361,7 +374,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn("no map is on screen", data["errors"][0])
         self.post({"map": tavern()})
-        self.main.get_nowait()
+        self.drain("map")
         code, data = self.post({"patch": {"move": [{"id": "Flerb", "to": "Z99"}]}})
         self.assertEqual(code, 400)
         self.assertTrue(self.main.empty())
@@ -379,7 +392,7 @@ class PushStatsFlagTests(unittest.TestCase):
 
     def args(self, **kw):
         base = dict(map_set=None, map_show=None, map_hide=False, stat_move=None, token_add=None, token_remove=None,
-                    map_new=None, map_id=None, map_name=None, token_party=False)
+                    map_new=None, map_id=None, map_name=None, token_party=False, scene_set=None)
         base.update(kw)
         return SimpleNamespace(**base)
 

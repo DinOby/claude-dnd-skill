@@ -102,6 +102,12 @@ except Exception:
 _maps = _grid_map.MapStore(_MAP_LIBRARY, rt("maps"), templates=_grid_map.MapTemplates(
     [_grid_map.DEFAULT_TEMPLATE_DIR, _MAP_USER_TEMPLATES]))
 
+# Scene state (stationary | travel | travel_event) — campaign data written by
+# scripts/travel.py too; the display brings the map in line with it
+import scene_state as _scene_state
+_scenes = _scene_state.SceneStore(rt("scene-state.json"))
+_scene_ready = False   # set once stats are loaded (event maps need the party)
+
 
 def _campaign_flag_list(flag: str) -> "Optional[list[str]]":
     """Comma list from a Session Flag in the active campaign's state.md.
@@ -158,16 +164,20 @@ def _apply_campaign_assets() -> None:
 
 
 def _apply_campaign_maps() -> None:
-    """Token placement lives in the active campaign's maps/ (runtime dir without one)."""
-    placement = rt("maps")
+    """Token placement and scene state live in the active campaign (runtime dir without one)."""
+    placement, scene = rt("maps"), rt("scene-state.json")
     try:
         camp = open(rt(".campaign"), encoding="utf-8").read().strip()
         if camp:
             placement = str(_find_campaign(camp) / "maps")
+            scene = str(_find_campaign(camp) / "scene-state.json")
     except (OSError, ValueError):
         pass
     if placement != _maps.placement_dir:
         _maps.set_placement_dir(placement)
+    _scenes.path = scene
+    if _scene_ready:
+        _reconcile_scene(full=False)
 
 
 def _on_campaign_change() -> None:
@@ -2151,6 +2161,60 @@ def map_get():
                     "templates": _maps.templates.list()})
 
 
+def _reconcile_scene(broadcast: bool = True, full: bool = True) -> "list[str]":
+    """Bring the battle map in line with the scene state; returns warnings.
+
+    travel → no map; travel_event → the event map (built from its template
+    with the party and the event's tokens when it does not exist yet, never
+    stored in the library); stationary → the scene's map or none.
+
+    full=False (startup, campaign switch) only enforces the travel states —
+    travel.py may have changed them while the display was off — and leaves a
+    stationary scene's map as it was loaded.
+    """
+    state = _scenes.get()
+    current = _maps.current()
+    warnings: list = []
+    if not full and state["mode"] == "stationary":
+        return warnings
+    want = state.get("map_id") if state["mode"] != "travel" else None
+    try:
+        if want is None:
+            if current:
+                _maps.hide()
+                if broadcast:
+                    _broadcast_main({"map": None})
+        elif not current or current["id"] != want:
+            if current and current.get("temporary"):
+                _maps.hide()                     # discard a stale event map
+            try:
+                m = _maps.show(want)
+            except _grid_map.MapError:
+                ev = state.get("event") or {}
+                if state["mode"] != "travel_event":
+                    raise
+                m = _maps.set_map({"template": ev.get("template") or "forest-clearing", "id": want,
+                                   "name": ev.get("title"),
+                                   "tokens": _party_tokens(None) + list(ev.get("tokens") or [])},
+                                  temporary=True)
+                warnings += [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
+            if broadcast:
+                _broadcast_main({"map": m})
+    except (_grid_map.MapError, OSError) as e:
+        warnings.append(f"map for the scene not shown: {e}")
+    if broadcast:
+        _broadcast_main({"scene_state": state})
+    return warnings
+
+
+def _scene_blocks_map() -> "Optional[str]":
+    """Reason a map cannot be shown right now (plain travel has none)."""
+    if _scenes.get()["mode"] == "travel":
+        return ("the party is travelling — no battle map during travel; start an event "
+                "(travel.py event) or arrive first (travel.py arrive)")
+    return None
+
+
 def _party_tokens(existing: "Optional[dict]") -> list:
     """Player characters from the stats that are not on the map yet (as pc tokens)."""
     with _stats_lock:
@@ -2181,10 +2245,14 @@ def map_post():
     if not isinstance(data, dict):
         return jsonify({"errors": ["body should be a JSON object"]}), 400
     warnings: list = []
+    if ("map" in data or "show" in data) and _scene_blocks_map():
+        return jsonify({"errors": [_scene_blocks_map()]}), 409
     try:
         if data.get("hide"):
             _maps.hide()
             _broadcast_main({"map": None})
+            if _scenes.get().get("map_id"):
+                _broadcast_main({"scene_state": _scenes.update(map_id=None)})
             return jsonify({"map_id": None, "rev": None, "warnings": []})
         if "map" in data:
             m = _maps.set_map(data["map"])
@@ -2211,7 +2279,45 @@ def map_post():
         return jsonify({"errors": [f"could not save the map: {e}"]}), 500
     warnings = [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
     _broadcast_main({"map": m})
+    if _scenes.get().get("map_id") != m["id"]:
+        _broadcast_main({"scene_state": _scenes.update(map_id=m["id"])})   # the scene's map now
     return jsonify({"map_id": m["id"], "rev": m["rev"], "warnings": warnings})
+
+
+@app.route("/scene", methods=["GET"])
+def scene_get():
+    return jsonify(_scenes.get())
+
+
+@app.route("/scene", methods=["POST"])
+def scene_post():
+    """Scene state changes.
+
+        {"sync": true}                                   re-read (after travel.py) and align the map
+        {"action": "scene-set", "location": "…"}         new place, no map (add one with --map-*)
+        {"action": "travel-start" | … , …}                 any transition of scene_state.py
+
+    Returns {"state", "warnings"}; 409 {"errors": [...]} for a transition that
+    is not allowed from the current state.
+    """
+    if not _token_ok():
+        return "Forbidden", 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"errors": ["body should be a JSON object"]}), 400
+    if not data.get("sync"):
+        action = data.get("action")
+        params = {k: v for k, v in data.items() if k != "action"}
+        if action == "scene-set":
+            params.setdefault("map_id", None)   # a new place starts without the old map
+        try:
+            _scenes.apply(str(action or ""), **params)
+        except _scene_state.SceneError as e:
+            return jsonify({"errors": [str(e)]}), 409
+        except TypeError as e:
+            return jsonify({"errors": [f"bad parameters: {e}"]}), 400
+    warnings = _reconcile_scene()
+    return jsonify({"state": _scenes.get(), "warnings": warnings})
 
 
 @app.route("/clear", methods=["POST"])
@@ -2838,8 +2944,9 @@ def stream():
     if recent:
         q.put_nowait({"replay_batch": recent})
 
-    # The battle map goes to main displays only (phones never render it).
+    # The battle map and scene state go to main displays only (phones never render them).
     if not _ch:
+        q.put_nowait({"scene_state": _scenes.get()})
         _m = _maps.current()
         if _m:
             q.put_nowait({"map": _m})
@@ -2935,6 +3042,11 @@ def stream():
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
+
+# The first campaign change ran before stats existed; align the map with the
+# scene state now that the party is known.
+_scene_ready = True
+_reconcile_scene(broadcast=False, full=False)
 
 if __name__ == "__main__":
     # Wire audio SFX broadcast now that _broadcast is defined

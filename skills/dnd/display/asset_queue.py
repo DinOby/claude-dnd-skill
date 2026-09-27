@@ -37,7 +37,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-class _FileLock:
+class FileLock:
     """Cross-process lock via O_EXCL; a lock older than _LOCK_STALE_S is broken."""
 
     def __init__(self, path: str):
@@ -98,7 +98,7 @@ class PendingQueue:
 
     def _locked(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        return _FileLock(self.path + ".lock")
+        return FileLock(self.path + ".lock")
 
     # ── API ──
     def entries(self, status: Optional[str] = None) -> "list[dict]":

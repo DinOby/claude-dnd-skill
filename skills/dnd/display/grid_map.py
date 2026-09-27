@@ -606,26 +606,35 @@ class MapStore:
         return os.path.join(self.placement_dir, "active.json")
 
     def _save(self, m: dict, layout: bool) -> None:
-        if layout:
+        placement = {"map_id": m["id"], "rev": m["rev"], "tokens": m["tokens"]}
+        if m.get("temporary"):
+            # event maps never enter the library; their layout travels with the placement
+            placement.update(temporary=True, layout={k: m[k] for k in LAYOUT_FIELDS if k in m})
+        elif layout:
             _write_json(self._layout_path(m["id"]), {k: m[k] for k in LAYOUT_FIELDS if k in m})
-        _write_json(self._placement_path(m["id"]), {"map_id": m["id"], "rev": m["rev"],
-                                                    "tokens": m["tokens"]})
+        _write_json(self._placement_path(m["id"]), placement)
         _write_json(self._active_path(), {"map_id": m["id"]})
 
     def load(self, map_id: str) -> Optional[dict]:
-        """Library layout + this campaign's tokens; None if the layout is unknown/broken."""
-        layout = _read_json(self._layout_path(map_id))
+        """Library layout (or a temporary map's own) + this campaign's tokens.
+
+        None if the layout is unknown/broken.
+        """
+        placement = _read_json(self._placement_path(map_id)) or {}
+        temporary = placement.get("temporary") is True and isinstance(placement.get("layout"), dict)
+        layout = placement["layout"] if temporary else _read_json(self._layout_path(map_id))
         if layout is None:
             return None
-        placement = _read_json(self._placement_path(map_id)) or {}
         raw = dict(layout, tokens=placement.get("tokens", []), rev=placement.get("rev", 0))
-        try:
-            return normalize_map(raw)
-        except MapError:
-            try:   # a layout edit left old tokens outside the grid → keep the layout
-                return normalize_map(dict(raw, tokens=[]))
+        for attempt in (raw, dict(raw, tokens=[])):   # a layout edit may strand old tokens
+            try:
+                m = normalize_map(attempt)
             except MapError:
-                return None
+                continue
+            if temporary:
+                m["temporary"] = True
+            return m
+        return None
 
     def _load_active(self) -> None:
         active = _read_json(self._active_path()) or {}
@@ -647,8 +656,11 @@ class MapStore:
         with self._lock:
             return copy.deepcopy(self._current)
 
-    def set_map(self, raw: dict) -> dict:
+    def set_map(self, raw: dict, temporary: bool = False) -> dict:
         """Show a full map; the layout is saved to the library.
+
+        `temporary` (travel-event maps): nothing goes to the library, and the
+        map is discarded when it is hidden.
 
         `{"template": "tavern-small", "id": …}` builds the layout from a
         template — unless the library already has a map with that id: layouts
@@ -658,7 +670,9 @@ class MapStore:
         kept (those that still fit the grid), so re-sending a layout does not
         clear the board. Tokens without a position go onto the spawn zones.
         """
-        if isinstance(raw, dict) and raw.get("template") and "cols" not in raw:
+        if isinstance(raw, dict) and raw.get("template") and "cols" not in raw and temporary:
+            raw = expand_template(raw, self.templates)
+        elif isinstance(raw, dict) and raw.get("template") and "cols" not in raw:
             map_id = slug(raw.get("id") or "") or slug(str(raw["template"]))
             stored = _read_json(self._layout_path(map_id))
             if stored is not None:
@@ -674,6 +688,8 @@ class MapStore:
                     m = normalize_map(dict(m, tokens=m["tokens"] + [tok]))
                 except MapError:
                     pass
+        if temporary:
+            m["temporary"] = True
         with self._lock:
             old = self._current if self._current and self._current["id"] == m["id"] else None
             m["rev"] = (old["rev"] + 1) if old else max(m["rev"], 1)
@@ -702,10 +718,14 @@ class MapStore:
             return applied, warnings
 
     def hide(self) -> None:
-        """Take the map off screen; files stay."""
+        """Take the map off screen; files stay — except a temporary map's, which is discarded."""
         with self._lock:
+            paths = [self._active_path()]
+            if self._current and self._current.get("temporary"):
+                paths.append(self._placement_path(self._current["id"]))
             self._current = None
-            try:
-                os.remove(self._active_path())
-            except OSError:
-                pass
+            for path in paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass

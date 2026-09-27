@@ -81,6 +81,10 @@ Usage:
     python3 push_stats.py --token-add '{"name":"Oger","kind":"enemy","at":"H3","size":2}'
     python3 push_stats.py --token-remove "Goblin 1"
     # Move/add/remove in one call apply together or not at all; problems are printed.
+
+    # Scene: a new place (without a journey) — clears the old map; combine with --map-* for the new one
+    python3 push_stats.py --scene-set "Zum grünen Kessel" --map-new tavern-small --map-id zum-gruenen-kessel
+    # Journeys and travel events: scripts/travel.py (start | day | event | event-end | arrive)
 """
 
 import sys
@@ -139,12 +143,12 @@ def _send(url: str, data: bytes, token: str) -> None:
         pass  # Display not running — fail silently
 
 
-def _post_map(body: dict, token: str) -> int:
-    """POST /map and print the outcome — map commands need feedback (bad square, unknown token)."""
+def _post_map(body: dict, token: str, route: str = "/map") -> int:
+    """POST /map (or /scene) and print the outcome — these commands need feedback."""
     headers = {"Content-Type": "application/json"}
     if token:
         headers["X-DND-Token"] = token
-    req = urllib.request.Request(FLASK_URL.replace("/stats", "/map"), data=json.dumps(body).encode("utf-8"),
+    req = urllib.request.Request(FLASK_URL.replace("/stats", route), data=json.dumps(body).encode("utf-8"),
                                  headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
@@ -155,15 +159,18 @@ def _post_map(body: dict, token: str) -> int:
         except ValueError:
             problems = [f"HTTP {e.code}"]
         for p in problems:
-            print(f"map: {p}", file=sys.stderr)
+            print(f"{route[1:]}: {p}", file=sys.stderr)
         return 1
     except Exception:
-        print("map: display not reachable — nothing changed", file=sys.stderr)
+        print(f"{route[1:]}: display not reachable — nothing changed", file=sys.stderr)
         return 0
     for w in result.get("warnings") or []:
-        print(f"map warning: {w}", file=sys.stderr)
+        print(f"{route[1:]} warning: {w}", file=sys.stderr)
     if result.get("map_id"):
         print(f"map {result['map_id']} rev {result['rev']}")
+    if isinstance(result.get("state"), dict):
+        st = result["state"]
+        print(f"scene {st.get('mode')}: {st.get('location') or '-'}")
     return 0
 
 
@@ -208,6 +215,10 @@ def _map_body(args) -> "tuple[list[dict], Optional[str]]":
     """Requests for /map from the --map-* / --stat-move / --token-* flags (in order)."""
     bodies = []
     try:
+        if args.scene_set is not None:
+            if not args.scene_set.strip():
+                raise ValueError("--scene-set needs a place name")
+            bodies.append({"_route": "/scene", "action": "scene-set", "location": args.scene_set.strip()})
         if args.map_set:
             raw = args.map_set
             if raw.startswith("@"):
@@ -322,6 +333,9 @@ def main() -> None:
     parser.add_argument("--map-show", metavar="ID",
                         help="Show a map from the library with this campaign's tokens")
     parser.add_argument("--map-hide", action="store_true", help="Take the battle map off screen")
+    parser.add_argument("--scene-set", metavar="PLACE",
+                        help="The party is now at PLACE (no journey); the previous map is cleared — "
+                             "add one with --map-new/--map-show in the same call")
     parser.add_argument("--map-new", metavar="TEMPLATE",
                         help="Show a map built from a template (tavern-small, forest-road, ...); "
                              "an existing library map with the same id is reused")
@@ -517,7 +531,8 @@ def main() -> None:
 
     rc = 0
     for body in map_bodies:
-        rc = _post_map(body, _read_token()) or rc
+        body = dict(body)
+        rc = _post_map(body, _read_token(), body.pop("_route", "/map")) or rc
         if rc:
             break
     if not payload:

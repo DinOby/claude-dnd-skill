@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–11 fertig, weiter mit 12
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–12 fertig, weiter mit 12b
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -229,6 +229,21 @@ stationary ──scene-set──▶ stationary   (Ortswechsel ohne Reise)
 
 Kampf ist kein eigener Zustand; er findet auf der Karte der aktuellen Szene statt.
 
+Umgesetzt in Schritt 12 (`display/scene_state.py`, `scripts/travel.py`):
+
+- Gespeichert in `<kampagne>/scene-state.json` (mit Sperrdatei); `travel.py`
+  schreibt direkt und funktioniert ohne Display, danach `POST /scene {"sync": true}`.
+- Zusätzlicher Übergang `travel-day` (travel → travel). Unbekannte Parameter
+  und unerlaubte Wechsel werden mit Hinweis abgelehnt („erst ankommen“).
+- Der Server gleicht die Karte an: `travel` → keine Karte (Kartenbefehle 409),
+  `travel_event` → Ereignis-Karte aus der Vorlage des Ereignisses mit Gruppe
+  und Gegnern, `temporary` (nicht in der Bibliothek, beim Ausblenden
+  verworfen); `stationary` → Karte der Szene. `--scene-set` räumt die alte
+  Karte ab; eine im Stillstand gezeigte Karte wird zur Karte der Szene.
+- Beim Start und Kampagnenwechsel werden nur die Reisezustände durchgesetzt,
+  eine geladene Karte im Stillstand bleibt.
+- Ereignis-id `<ereignis>-d<tag>`, Karten-id `event-<id>`.
+
 ### Anzeigeregel (`display_mode: auto | scene | grid`, bei `auto`)
 
 | Zustand | Anzeige |
@@ -295,7 +310,8 @@ Reisen laufen über `scripts/travel.py`:
   (`travel_event_chance` in `state.md`, Standard 15 % pro Reisetag; Ereignisarten
   aus `travel-events.json`, Rückfall `oracle.py event`). Bei Ereignis wird
   `travel_event` mit Karte gesetzt.
-- `event --force`, `event-end`, `arrive --location Dornfeld`
+- `event [--id ID | --title T --template TPL]` (erzwingt ein Ereignis), `event-end`,
+  `arrive [--location Dornfeld]`, `status`
 
 ---
 

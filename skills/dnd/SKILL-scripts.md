@@ -251,6 +251,8 @@ Moves, adds and removes in one call apply together or not at all; rejected comma
 
 Templates (`display/map-templates/`, own ones or replacements in `<data-root>/map-templates/`): `tavern-small`, `market-square`, `forest-road`, `forest-clearing`, `mountain-pass`, `bridge`, `camp`, `cave-mouth`, `dungeon-corridor`, `ruins` — each with walls/obstacles, spawn zones for `pc`, `enemy` and `npc` (objects use the npc zone) and the matching seed background (`map:taverne`, `map:waldweg`, …). `--map-new` with an id that is already in the library shows the stored layout instead (layouts are reused; the template only seeds a new one). A token without a position (`"Goblin:enemy"`, `"Wirtin Hilde"`) takes the first free square of its zone, or the nearest free square when the zone is full. `--token-party` adds every player character from the stats that is not on the map yet. `GET /map` lists the templates. The browser grid view comes in a later step; until then the commands only store and broadcast the map.
 
+**Scene:** `--scene-set "Zum grünen Kessel"` = the party is now at this place without a journey; the previous map is cleared, so add the new one in the same call (`--scene-set "…" --map-new tavern-small --map-id zum-gruenen-kessel`). A map shown while stationary becomes the scene's map. During plain travel map commands are refused (exit 1) — journeys go through `scripts/travel.py`.
+
 **Player input queue — `display/check_input.py`:**
 ```bash
 # Called at the start of each turn BEFORE processing the player's message.
@@ -410,6 +412,24 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py diff --campaign $CAMP --jso
 # Diff two snapshot files directly (no campaign lookup):
 python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py diff-files before.json after.json
 ```
+
+---
+
+## Travel — `scripts/travel.py`
+
+The scene state (`<campaign>/scene-state.json`) is `stationary` (at a place), `travel` (on the road, no battle map) or `travel_event` (something happens on the road, with a temporary event map). Only these changes are allowed: `stationary → travel` (start), `travel → travel_event` (event), `travel_event → travel` (event-end), `travel → stationary` (arrive), plus `--scene-set` between places. A refused command says what to do instead. Works without the display; a running display follows automatically.
+
+```bash
+T="python3 ${CLAUDE_SKILL_DIR}/scripts/travel.py"          # -c CAMPAIGN optional (default: active campaign)
+$T start --to Dornfeld --days 4 --terrain forest --via "Königsstraße"   # from = current place
+$T day                      # one travel day: calendar +1 day, then the event check
+$T event                    # force an event now (table draw); --id wolfsrudel, or --title "…" --template forest-road
+$T event-end                # event over, journey continues; the event map is discarded
+$T arrive                   # at the destination (or --location "Elsewhere")
+$T status                   # where the party is, day x/y, event chance
+```
+
+`day` rolls d100 against `travel_event_chance: N` from state.md Session Flags (default 15 %). On a hit it draws a weighted event for the journey's terrain from `display/config/travel-events.json` (terrains `road forest hills mountain river plains swamp`, plus `any`; own events via `<data-root>/config/travel-events.json`) and prints title, tokens, a hint and a Mythic event focus to interpret. The display then shows the event map: the event's template with the party on the pc zone and the event's creatures on the enemy zone; it never enters the map library. After the last day `day` refuses and asks for `arrive`. Without a campaign calendar the clock is skipped with a note.
 
 ---
 
