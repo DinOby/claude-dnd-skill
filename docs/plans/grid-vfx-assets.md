@@ -51,7 +51,7 @@ Module weiterreicht.
 ### Stichwort-Erkennung
 
 `TriggerMatcher` (`display/triggers.py`) wird aus `audio.py` herausgelöst und
-von Sound und Einblendungen gemeinsam genutzt. Neu: `wort*` = Wortanfang.
+von Sound und Einblendungen gemeinsam genutzt. Neu: `wort*` = Wortanfang (auch in Phrasen: `greif* an`).
 
 ---
 
@@ -64,7 +64,7 @@ Zwei getrennte Dateien — *welcher Text löst was aus* und *wie sieht es aus*:
 {"version":1, "cooldown_ms":1500, "max_per_chunk":1,
  "triggers": {
    "de": {"attack":["greift an","schlägt zu","Hieb"], "steal":["stiehlt","klaut","entwendet"],
-          "spell":["Zauber","wirkt *","beschwört"], "heal":["heilt","Heiltrank"]},
+          "spell":["Zauber","wirkt +","beschwört"], "heal":["heilt","Heiltrank"]},
    "en": {"attack":["attacks","strikes","slash*"]}}}
 
 // vfx-iconset.json

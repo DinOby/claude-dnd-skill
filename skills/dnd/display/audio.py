@@ -15,7 +15,13 @@ import io
 import os
 import re
 import struct
+import sys
 from typing import Callable, Optional
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from triggers import TriggerMatcher, UNSPACED_LANGS
 
 try:
     import numpy as np
@@ -72,10 +78,9 @@ def on_text(text: str) -> None:
     """Scan narration text for SFX triggers; broadcast at most one per call."""
     if not _sfx_on or not _broadcast_fn:
         return
-    for pattern, sfx_name in _SFX_MAP:
-        if pattern.search(text):
-            _broadcast_fn({"sfx": sfx_name})
-            return
+    sfx_name = _matcher.first_match(text)
+    if sfx_name:
+        _broadcast_fn({"sfx": sfx_name})
 
 
 # ── WAV generation ─────────────────────────────────────────────────────────────
@@ -242,11 +247,8 @@ def _synth_sfx(name: str) -> Optional["np.ndarray"]:
 
 
 # ── SFX language packs ──────────────────────────────────────────────────────────
-# Each language contributes trigger phrases per SFX category.
-# Convention:
-#   "word"       → literal match (with auto-suffix for Latin scripts)
-#   "word1 word2" → words must appear in sequence (whitespace between)
-#   "word +"     → word followed by exactly one other token
+# Each language contributes trigger phrases per SFX category. Phrase syntax
+# ("word", "word1 word2", "word +", "stem*") is documented in triggers.py.
 # Add a language by adding a new top-level key — zero code changes needed.
 
 _SFX_TRIGGERS: dict[str, dict[str, list[str]]] = {
@@ -623,68 +625,21 @@ _SFX_TRIGGERS: dict[str, dict[str, list[str]]] = {
     },
 }
 
-# Languages whose scripts are unspaced (or where literal substring matching
-# is the right semantic): no \b word boundaries; phrases match anywhere.
-# Includes CJK, Thai, Arabic (RTL, connected glyphs).
-_UNSPACED_LANGS = frozenset(["zh", "ja", "ko", "th", "ar"])
+
+# Unspaced scripts get literal substring matching — see triggers.py.
+_UNSPACED_LANGS = UNSPACED_LANGS
 
 # Backwards-compat alias — pre-existing code referenced _CJK_LANGS.
 _CJK_LANGS = _UNSPACED_LANGS
-_CJK_START = "一"
-_CJK_END   = "鿿"
 
 # All language codes we ship packs for. Used for validation in set_sfx_languages.
 _AVAILABLE_LANGS = frozenset(_SFX_TRIGGERS.keys())
 
 
-def _compile_trigger_list(triggers: list[str], is_unspaced: bool) -> str:
-    """Build a regex alternation string from a list of trigger phrases.
-
-    `is_unspaced` languages (CJK, Thai, Arabic) use literal substring matching
-    because there are no word-boundary tokens to anchor on (or, in Arabic's
-    case, the glyphs connect rather than separate cleanly).
-    """
-    parts: list[str] = []
-    for t in triggers:
-        t = t.strip()
-        if not t:
-            continue
-        if is_unspaced:
-            parts.append(re.escape(t))
-        elif t.endswith(" +"):
-            word = re.escape(t[:-2].strip())
-            parts.append(r"\b" + word + r"\s+\w+")
-        elif " " in t:
-            words = [re.escape(w) for w in t.split()]
-            parts.append(r"\b" + r"\s+".join(words) + r"\b")
-        else:
-            parts.append(r"\b" + re.escape(t) + r"\b")
-
-    return "|".join(parts)
-
-
-def _rebuild_sfx_map() -> None:
-    """Rebuild _SFX_MAP from active language packs."""
-    global _SFX_MAP
-    _SFX_MAP.clear()
-    for lang in _SFX_LANGUAGES:
-        pack = _SFX_TRIGGERS.get(lang)
-        if not pack:
-            continue
-        is_unspaced = lang in _UNSPACED_LANGS
-        # Latin / Cyrillic / Greek / Indic etc. → case-insensitive match.
-        # Unspaced scripts → no flag; case isn't meaningful in those scripts.
-        flag = re.UNICODE if is_unspaced else (re.IGNORECASE | re.UNICODE)
-        for sfx_name, triggers in pack.items():
-            regex = _compile_trigger_list(triggers, is_unspaced)
-            if regex:
-                _SFX_MAP.append((re.compile(regex, flag), sfx_name))
-
-
 # ── Active language configuration ──────────────────────────────────────────────
 
-_SFX_LANGUAGES: list[str] = ["en"]
-_SFX_MAP: list = []
+# English-only until set_sfx_languages() / DND_SFX_LANGUAGES says otherwise.
+_matcher = TriggerMatcher(_SFX_TRIGGERS, languages=["en"], unspaced_langs=_UNSPACED_LANGS)
 
 
 def set_sfx_languages(langs: list[str]) -> None:
@@ -694,14 +649,12 @@ def set_sfx_languages(langs: list[str]) -> None:
         set_sfx_languages(["en", "zh"]) — English first, then Chinese.
         set_sfx_languages(["es", "en"]) — Spanish first, English fallback.
     """
-    global _SFX_LANGUAGES
-    _SFX_LANGUAGES = [l.strip() for l in langs if l.strip()]
-    _rebuild_sfx_map()
+    _matcher.set_languages(langs)
 
 
 def available_languages() -> list[str]:
     """Return the sorted list of language codes we ship SFX packs for."""
-    return sorted(_AVAILABLE_LANGS)
+    return _matcher.available_languages()
 
 
 def _load_languages_from_env() -> None:
@@ -718,6 +671,4 @@ def _load_languages_from_env() -> None:
         set_sfx_languages(valid)
 
 
-# Build default (English-only) on import, then apply env override if set
-_rebuild_sfx_map()
 _load_languages_from_env()
