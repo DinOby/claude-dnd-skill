@@ -217,6 +217,15 @@ The Sound Effects toggle in the top-right corner of the display enables/disables
 - All previous responses remain visible and scroll naturally
 - NPC dialogue renders with an amber border; dice results render in gold inline style; tutor hints render as collapsible parchment blocks
 
+### Configuration files
+
+Tunable data (trigger words, icon sets, templates) lives in JSON, not in code. `config_loader.py` reads each file in two layers:
+
+1. **Bundled default** — `display/config/<name>`, replaced on every plugin update
+2. **Your override** — `<data-root>/config/<name>` (default `~/.claude/dnd/config/`), never touched by updates
+
+Your file only needs the keys you change: objects merge key by key, lists and plain values replace, and `null` removes a key. Edits apply without restarting the server. A broken override (invalid JSON or wrong types) is ignored with a warning on the server console, and the bundled default stays in effect.
+
 ---
 
 ## Troubleshooting

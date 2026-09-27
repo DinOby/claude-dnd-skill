@@ -105,6 +105,15 @@ def runtime_dir() -> pathlib.Path:
     return d
 
 
+def user_config_dir() -> pathlib.Path:
+    """User overrides for the display's bundled JSON config (update-safe).
+
+    Files here are merged over display/config/ by display/config_loader.py.
+    Not created on read — a missing directory just means "no overrides".
+    """
+    return _root() / "config"
+
+
 def campaigns_dir() -> pathlib.Path:
     """Return the campaigns directory under the configured root."""
     return _root() / "campaigns"
