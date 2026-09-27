@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9), weiter mit Phase D
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), weiter mit Phase D
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -118,11 +118,51 @@ Ereignis-Karten kommen nicht auf die Liste.
 
 `status`: `pending | done | failed | skipped`.
 
-### /dm:dnd assets <status|generate|add|skip|retry>
+### /dm:dnd assets <status|generate|seed|add|skip|retry>
 
 `generate`: Claude ergänzt Beschreibungen aus dem Kampagnenkontext, dann
 erzeugt `scripts/assets.py generate [--limit N] [--provider X] [--dry-run]`
 die Bilder. Läuft auch ohne Claude und im Hintergrund.
+
+### Standardkatalog vorab erzeugen (seed)
+
+Die Warteliste erfährt von Inhalten erst, wenn sie im Spiel auftauchen.
+Kampagnenunabhängige Standardinhalte sind vorher bekannt und werden mit
+`scripts/assets.py seed [--category items|portraits|maps] [--limit N] [--provider X] [--dry-run]`
+(`/dm:dnd assets seed`) einmal erzeugt und von allen Kampagnen genutzt:
+
+- **items** — Standardausrüstung aus dem SRD (Langschwert, Heiltrank,
+  Lederrüstung, Kurzbogen …), deutsche Namen, englischer SRD-Name als Alias.
+- **portraits** — Archetypen ohne konkrete NSC-Namen (menschlicher Krieger,
+  Elfen-Magierin, Zwergen-Kleriker, Wirtin, Stadtwache, Goblin, Ork …).
+- **maps** — Hintergründe für wiederkehrende Szenenarten (Taverne, Waldweg,
+  Verlies-Korridor, Höhle …), je mit der passenden Kartenvorlage (`template`).
+
+Der Katalog `display/config/asset-seed.json` gehört zur Plugin-Konfiguration,
+nicht zur Kampagne (eigene Einträge in `<data-root>/config/asset-seed.json`;
+Einträge sind nach Slug geschlüsselt, `null` entfernt einen). Die englischen
+Bildbeschreibungen stehen im Katalog, Claude muss nichts ergänzen.
+
+```json
+{"items": {"langschwert": {"name": "Langschwert", "category": "weapon", "srd": "Longsword",
+                           "aliases": ["Longsword"], "prompt": "a straight double-edged steel longsword …"}},
+ "maps":  {"taverne": {"name": "Taverne", "category": "map", "template": "tavern-small", "prompt": "…"}}}
+```
+
+Ergebnis im **selben Manifest** wie kampagnenspezifische Bilder, mit
+generischem Schlüssel (`item:langschwert`, `token:goblin`, `map:taverne`) und
+`"generic": true`, `"seed": "items"`. Vorrang:
+
+- `seed` ersetzt nie ein vorhandenes Bild und überspringt Schlüssel, die auf
+  der Warteliste `pending` sind (die bekommen ihr eigenes Bild).
+- Ein spezifisches Bild mit demselben Schlüssel ersetzt das generische:
+  `generate` eines Wartelisten-Eintrags oder `add`. Ein generisches Bild zählt
+  im Spiel als vorhanden (kommt nicht automatisch auf die Warteliste); soll es
+  ersetzt werden: `assets.py prompt KEY "…" --add`, dann `generate`.
+- Fehlschläge werden nicht gespeichert; der nächste `seed`-Lauf versucht es erneut.
+
+Voller Katalog ≈ 95 Bilder ≈ 3,20 $ mit dem Standardmodell; `--dry-run` zeigt
+vorher Anzahl und Prompts.
 
 ### Bilddienst-Schnittstelle
 
@@ -214,7 +254,9 @@ Kampf ist kein eigener Zustand; er findet auf der Karte der aktuellen Szene stat
   kampagnenübergreifend wiederverwendet; **Belegung** (Figuren) pro Kampagne.
 - **Vorlagen** in `map-templates/` mit `spawn`-Feldern für Gruppe, Gegner, NSC
   (`tavern-small`, `market-square`, `forest-road`, `forest-clearing`,
-  `mountain-pass`, `bridge`, `camp`, `cave-mouth`, `ruins`).
+  `mountain-pass`, `bridge`, `camp`, `cave-mouth`, `dungeon-corridor`, `ruins`).
+  Vorlagen verweisen als Hintergrund auf die generischen Seed-Karten
+  (`"background": {"asset": "map:taverne"}`).
 - `/dm:dnd maps <list|reset|restore>`: `reset <id>`, `--tag tavern`, `--all`,
   `--keep-image`. Reset archiviert, löscht nie endgültig.
 
@@ -252,14 +294,18 @@ Jeder Schritt ein eigener PR mit Tests.
 7. Kategorie-Erkennung und Warteliste (Inventar).
 8. Bilddienst-Schnittstelle, `dummy`-Dienst, `assets.py`, `/dm:dnd assets`.
 9. Gemini-Dienst, Stilvorgaben, Nachbearbeitung.
+9b. Standardkatalog `asset-seed.json` und `assets.py seed` (SRD-Ausrüstung,
+    Archetyp-Portraits, Szenen-Hintergründe), generische Schlüssel mit Vorrang
+    für spezifische Bilder, `prompt --add`.
 
 **Phase D – Grid und Szenenzustände**
 10. Kartenmodell, Teil-Updates, Schach-Koordinaten, `--stat-move`, `--token-*`, Speicherung.
-11. Kartenvorlagen und Platzierung auf `spawn`-Feldern.
+11. Kartenvorlagen und Platzierung auf `spawn`-Feldern; Hintergrund aus der Seed-Karte der Vorlage.
 12. `scene_state`-Zustandsmaschine, Bibliothek/Belegung getrennt, `travel.py` mit automatischer Ereignis-Probe.
 12b. `/dm:dnd maps list|reset|restore`.
 13. `grid.js`: Raster, Figuren mit Initialen, animierte Bewegung.
 14. `scene-mode.js`: Anzeigeregel, Reise- und Ereignis-Banner; nicht auf Handys.
 15. Figuren über `AssetResolver`, Markierung der Figur am Zug, Kartenbilder, Warteliste für Figuren/Karten.
+    Figuren ohne eigenes Bild können über `archetype` (z. B. `token:zwergischer-kleriker`) auf ein generisches Portrait zurückfallen.
 16. `SKILL.md`/`SKILL-commands.md`: wann `--scene-set`, `travel.py start|day|arrive`, `event-end`; `combat start` legt nur bei Bedarf eine Karte an. Testsitzung.
 17. *(Optional)* Einblendungen über der Figur der handelnden Person.

@@ -22,6 +22,7 @@ for p in (str(DISPLAY), str(SKILL / "scripts")):
         sys.path.insert(0, p)
 
 import asset_pipeline as ap          # noqa: E402
+import asset_seed as aseed           # noqa: E402
 import image_providers as ip         # noqa: E402
 from asset_queue import PendingQueue  # noqa: E402
 from asset_store import AssetStore    # noqa: E402
@@ -204,6 +205,115 @@ class ProviderLoaderTests(unittest.TestCase):
                 ip.load_provider("x", cfg, user_dir=tempfile.mkdtemp())
 
 
+class SeedTests(_Case):
+    CATALOGUE = {
+        "version": 1,
+        "items": {
+            "langschwert": {"name": "Langschwert", "category": "weapon", "srd": "Longsword",
+                            "aliases": ["Longsword"], "prompt": "a plain steel longsword"},
+            "heiltrank": {"name": "Heiltrank", "category": "potion", "prompt": "a red potion"},
+            "fackel": {"name": "Fackel", "category": "gear", "prompt": "a burning torch"},
+        },
+        "portraits": {"goblin": {"name": "Goblin", "category": "enemy", "prompt": "a small goblin"}},
+        "maps": {"taverne": {"name": "Taverne", "category": "map", "template": "tavern-small",
+                             "prompt": "a tavern interior"}},
+    }
+
+    def setUp(self):
+        super().setUp()
+        seed_dir = Path(self._tmp.name) / "seed-default"
+        seed_dir.mkdir()
+        (seed_dir / "asset-seed.json").write_text(json.dumps(self.CATALOGUE), encoding="utf-8")
+        self.catalog = aseed.SeedCatalog(ConfigFile("asset-seed.json", validator=aseed.validate_seed_config,
+                                                    default_dir=str(seed_dir), user_dir=str(self.user_cfg)))
+
+    def test_bundled_catalogue_is_valid_and_matches_the_srd(self):
+        cfg = ConfigFile("asset-seed.json", validator=aseed.validate_seed_config,
+                         default_dir=str(DISPLAY / "config"), user_dir=str(self.user_cfg))
+        entries = aseed.SeedCatalog(cfg).entries()
+        self.assertEqual(cfg.warnings, [])
+        self.assertEqual({e["set"] for e in entries}, set(aseed.SETS))
+        srd = json.loads((SKILL / "data" / "dnd5e_srd.json").read_text(encoding="utf-8"))
+        known = {"items": {r["name"] for s in ("equipment", "magic_items") for r in srd[s]},
+                 "portraits": {r["name"] for r in srd["monsters"]}}
+        for e in entries:
+            if e["srd"]:
+                self.assertIn(e["srd"], known[e["set"]], e["key"])
+            if e["set"] == "maps":
+                self.assertTrue(e["template"], e["key"])
+
+    def test_validator(self):
+        bad = json.loads(json.dumps(self.CATALOGUE))
+        bad["items"]["schwert"] = {"name": "Langes Schwert", "prompt": "x"}                  # slug ≠ name
+        bad["items"]["dolch"] = {"name": "Dolch", "category": "npc", "prompt": "x"}          # wrong category
+        bad["items"]["axt"] = {"name": "Axt", "aliases": ["Longsword"], "prompt": "x"}       # alias taken
+        bad["maps"]["hoehle"] = {"name": "Höhle"}                                             # no prompt
+        problems = " | ".join(aseed.validate_seed_config(bad))
+        for needle in ("slug should be 'langes-schwert'", "unknown category 'npc'",
+                       "alias 'Longsword' is already used", "maps.hoehle.prompt is required"):
+            self.assertIn(needle, problems)
+        with self.assertRaises(ValueError):
+            self.catalog.entries(["monsters"])
+
+    def test_seed_end_to_end(self):
+        summary = self.p.seed(self.catalog, log=self.log.append)
+        self.assertEqual(summary["done"], ["item:langschwert", "item:heiltrank", "item:fackel",
+                                           "token:goblin", "map:taverne"])
+        entry = self.store.global_manifest.entry("item:langschwert")
+        self.assertTrue(entry["generic"])
+        self.assertEqual((entry["seed"], entry["srd"], entry["category"]), ("items", "Longsword", "weapon"))
+        self.assertTrue(entry["prompt"].startswith("A plain steel longsword. "))
+        self.assertEqual(self.store.global_manifest.entry("map:taverne")["template"], "tavern-small")
+        self.assertTrue((self.assets / "maps" / "taverne.png").is_file())
+        # the English SRD name resolves to the same generic image
+        self.assertEqual(self.store.resolve("item", "Longsword")["key"], "item:langschwert")
+        self.assertIsNotNone(self.store.resolve("item", "Langschwert")["url"])
+        self.assertEqual(self.queue.entries(), [])             # seeding never touches the wait-list
+        again = self.p.seed(self.catalog, log=self.log.append)
+        self.assertEqual((again["done"], len(again["existing"])), ([], 5))
+
+    def test_categories_limit_and_dry_run(self):
+        planned = self.p.seed(self.catalog, sets=["items"], dry_run=True)["planned"]
+        self.assertEqual([x["key"] for x in planned], ["item:langschwert", "item:heiltrank", "item:fackel"])
+        self.assertFalse((self.assets / "items").exists())
+        self.p.add_file("item:heiltrank", str(self._png("own.png")))
+        summary = self.p.seed(self.catalog, sets=["items", "maps"], limit=2, log=self.log.append)
+        self.assertEqual(summary["done"], ["item:langschwert", "item:fackel"])   # existing one does not count
+        self.assertEqual(summary["existing"], ["item:heiltrank"])
+        self.assertEqual(self.store.global_manifest.entry("item:heiltrank")["source"], "manual")
+
+    def test_pending_wait_list_entry_is_left_to_generate(self):
+        self.queue_items("Langschwert")
+        summary = self.p.seed(self.catalog, sets=["items"], log=self.log.append)
+        self.assertEqual(summary["queued"], ["item:langschwert"])
+        self.assertIsNone(self.store.global_manifest.entry("item:langschwert"))
+
+    def test_specific_image_replaces_the_generic_one(self):
+        self.p.seed(self.catalog, sets=["items"], log=self.log.append)
+        self.queue_items("Langschwert")
+        self.queue.update("item:langschwert", prompt="a longsword whose blade glows like embers")
+        summary = self.p.generate(log=self.log.append)
+        self.assertEqual(summary["done"], ["item:langschwert"])
+        entry = self.store.global_manifest.entry("item:langschwert")
+        self.assertNotIn("generic", entry)
+        self.assertIn("embers", entry["prompt"])
+        # a later seed run keeps the specific image
+        self.assertEqual(self.p.seed(self.catalog, sets=["items"], log=self.log.append)["existing"],
+                         ["item:langschwert", "item:heiltrank", "item:fackel"])
+
+    def test_failures_are_not_recorded(self):
+        self.flaky.generate = mock.Mock(side_effect=ip.ProviderError("rate limited"))
+        summary = self.p.seed(self.catalog, sets=["portraits"], provider="flaky", log=self.log.append)
+        self.assertEqual(summary["failed"], ["token:goblin"])
+        self.assertIsNone(self.store.global_manifest.entry("token:goblin"))
+        self.assertEqual(self.queue.entries(), [])
+
+    def _png(self, name):
+        path = Path(self._tmp.name) / name
+        path.write_bytes(b"\x89PNG\r\n\x1a\n own")
+        return path
+
+
 class CliTests(_Case):
     def run_cli(self, *argv):
         spec = importlib.util.spec_from_file_location("assets_cli_under_test", SKILL / "scripts" / "assets.py")
@@ -233,6 +343,30 @@ class CliTests(_Case):
         rc, _, err, _ = self.run_cli("prompt", "item:unbekannt", "x")
         self.assertEqual(rc, 1)
         self.assertIn("not on the wait-list", err)
+
+    def test_seed_and_prompt_add(self):
+        catalog = aseed.SeedCatalog(ConfigFile("asset-seed.json", validator=aseed.validate_seed_config,
+                                               default_dir=str(DISPLAY / "config"), user_dir=str(self.user_cfg)))
+        with mock.patch.object(aseed, "SeedCatalog", lambda: catalog):
+            rc, out, _, notify = self.run_cli("seed", "--category", "maps", "--dry-run")
+            self.assertEqual(rc, 0)
+            self.assertIn("map:taverne via dummy", out)
+            notify.assert_not_called()
+            rc, out, _, notify = self.run_cli("seed", "--category", "items", "--limit", "2")
+            self.assertIn("Done: 2, failed: 0", out)
+            notify.assert_called_once()
+        self.assertTrue(self.store.global_manifest.entry("item:dolch")["generic"])
+        rc, _, err, _ = self.run_cli("prompt", "Dolch", "a dagger with a bone handle")
+        self.assertEqual(rc, 1)
+        self.assertIn("--add", err)
+        rc, out, _, _ = self.run_cli("prompt", "Dolch", "a dagger with a bone handle", "--add")
+        self.assertEqual(rc, 0)
+        entry = self.queue.entries()[0]
+        self.assertEqual((entry["key"], entry["name"], entry["category"], entry["status"]),
+                         ("item:dolch", "Dolch", "weapon", "pending"))
+        rc, out, _, _ = self.run_cli("generate")
+        self.assertIn("Done: 1", out)
+        self.assertNotIn("generic", self.store.global_manifest.entry("item:dolch"))
 
     def test_blocked_generate_exits_nonzero(self):
         self.flaky.ready = False

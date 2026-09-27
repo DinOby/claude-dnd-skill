@@ -227,6 +227,7 @@ Inventory entries on the character sheet show a thumbnail: an image from `<data-
 Images are **never generated during play**. Items without an image go on a wait-list (`<data-root>/assets/pending-assets.json`; mundane gear is left out by default, see `queue_categories`). Between sessions, `/dm:dnd assets generate` (or `scripts/assets.py generate`) works through it; the running display picks up new images automatically.
 
 - **Image service:** `config/image-provider.json` — default `gemini` (`gemini-3.1-flash-lite-image`, ≈ $0.034 per image, needs `GEMINI_API_KEY` or `DND_IMAGE_KEY`), `dummy` for offline tests. The shared `style` prompt keeps all images in one look. Your own back end: a module with `create(config)` in `<data-root>/providers/`, then add it under `providers` in your override.
+- **Standard catalogue:** `scripts/assets.py seed [--category items|portraits|maps] [--limit N]` generates known, campaign-independent content ahead of play — SRD equipment, archetype portraits, map backgrounds — from `config/asset-seed.json`. These entries are marked generic; a campaign-specific image for the same key replaces them.
 - **Own pictures:** `scripts/assets.py add "item:Dolch" dolch.png --category weapon`. A campaign's `assets/` folder (same layout) overrides the global images.
 - **Optional:** with Pillow installed (`pip install pillow`), generated images are downscaled to the configured `sizes`.
 

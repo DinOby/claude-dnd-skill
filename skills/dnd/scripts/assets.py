@@ -8,14 +8,21 @@ Usage:
     python3 assets.py status                     # counts + pending entries
     python3 assets.py list [--status failed]     # entries (all statuses by default)
     python3 assets.py providers                  # configured image services + readiness
-    python3 assets.py prompt KEY "TEXT"          # set the visual description for one entry
+    python3 assets.py prompt KEY "TEXT" [--add]  # set the visual description (--add: queue KEY if missing)
     python3 assets.py generate [--limit N] [--provider NAME] [--key KEY ...] [--dry-run]
     python3 assets.py add KEY FILE [--category C] [--name "Display Name"]
     python3 assets.py skip KEY [KEY ...]         # never generate these
     python3 assets.py retry [KEY ...]            # failed/skipped → pending (all failed if no KEY)
+    python3 assets.py seed [--category items|portraits|maps ...] [--limit N] [--provider NAME] [--dry-run]
+                                                 # standard content from config/asset-seed.json
 
 KEY is "item:Flammenschwert der Asche", "token:Wirtin Hilde", "map:…" or a
 plain item name; it is normalised the same way the display does.
+
+`seed` makes campaign-independent images (SRD equipment, archetype portraits,
+map backgrounds) from the bundled catalogue ahead of play. They are marked
+generic in the manifest; a specific image for the same key replaces them —
+queue it with `prompt KEY "…" --add`, or use `add`.
 
 Image services are configured in display/config/image-provider.json
 (override: <data-root>/config/image-provider.json).
@@ -42,6 +49,7 @@ for _p in (_HERE, _DISPLAY):
 
 from asset_pipeline import Pipeline, parse_key            # noqa: E402
 from asset_queue import STATUSES, PendingQueue            # noqa: E402
+from asset_seed import SETS, SeedCatalog                  # noqa: E402
 from asset_store import CATEGORIES, AssetStore            # noqa: E402
 
 
@@ -114,10 +122,22 @@ def cmd_providers(p: Pipeline, args) -> int:
 
 def cmd_prompt(p: Pipeline, args) -> int:
     key = parse_key(args.key)
-    if not p.queue.update(key, prompt=args.text.strip() or None):
-        print(f"not on the wait-list: {key}", file=sys.stderr)
+    if not key:
+        print(f"invalid key: {args.key}", file=sys.stderr)
         return 1
-    print(f"prompt set for {key}")
+    fields = {"prompt": args.text.strip() or None}
+    if args.add:
+        # (Re)queue: e.g. a campaign-specific version of a generic seed image.
+        found = p.store.find(key)
+        known = found["entry"] if found else {}
+        kind, _, slug = key.partition(":")
+        p.queue.add_many([{"key": key, "kind": kind, "name": known.get("name") or slug.replace("-", " "),
+                           "category": known.get("category")}])
+        fields.update(status="pending", attempts=0, last_error=None)
+    if not p.queue.update(key, **fields):
+        print(f"not on the wait-list: {key} (use --add to put it there)", file=sys.stderr)
+        return 1
+    print(f"prompt set for {key}" + (" (pending)" if args.add else ""))
     return 0
 
 
@@ -171,6 +191,27 @@ def cmd_retry(p: Pipeline, args) -> int:
     return 0
 
 
+def cmd_seed(p: Pipeline, args) -> int:
+    try:
+        summary = p.seed(SeedCatalog(), sets=args.category, limit=args.limit,
+                         provider=args.provider, dry_run=args.dry_run)
+    except ValueError as e:
+        print(f"seed failed: {e}", file=sys.stderr)
+        return 1
+    skipped = (f"{len(summary['existing'])} already have an image, "
+               f"{len(summary['queued'])} are pending on the wait-list")
+    if args.dry_run:
+        for item in summary["planned"]:
+            print(f"- {item['key']} via {item['provider']}\n    {item['prompt']}")
+        print(f"{len(summary['planned'])} image(s) would be generated ({skipped}).")
+        return 0
+    print(f"Done: {len(summary['done'])}, failed: {len(summary['failed'])}, "
+          f"blocked (provider not ready): {len(summary['blocked'])}; {skipped}")
+    if summary["done"]:
+        _notify_display()
+    return 1 if summary["blocked"] and not summary["done"] else 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="assets", description="Images for items, tokens and maps.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -182,6 +223,7 @@ def main(argv=None) -> int:
     pr = sub.add_parser("prompt", help="set the visual description for one entry")
     pr.add_argument("key")
     pr.add_argument("text")
+    pr.add_argument("--add", action="store_true", help="put KEY on the wait-list (again) if needed")
     gen = sub.add_parser("generate", help="generate images for pending entries")
     gen.add_argument("--limit", type=int)
     gen.add_argument("--provider")
@@ -196,11 +238,17 @@ def main(argv=None) -> int:
     sk.add_argument("key", nargs="+")
     rt_ = sub.add_parser("retry", help="put failed/skipped entries back to pending")
     rt_.add_argument("key", nargs="*")
+    sd = sub.add_parser("seed", help="generate standard content from the seed catalogue")
+    sd.add_argument("--category", action="append", choices=list(SETS),
+                    help="items, portraits or maps (repeatable; default: all)")
+    sd.add_argument("--limit", type=int)
+    sd.add_argument("--provider")
+    sd.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
     handlers = {"status": cmd_status, "list": cmd_list, "providers": cmd_providers,
                 "prompt": cmd_prompt, "generate": cmd_generate, "add": cmd_add,
-                "skip": cmd_skip, "retry": cmd_retry}
+                "skip": cmd_skip, "retry": cmd_retry, "seed": cmd_seed}
     return handlers[args.cmd](_pipeline(), args)
 
 

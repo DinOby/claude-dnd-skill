@@ -22,6 +22,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 from asset_queue import PendingQueue
+from asset_seed import SeedCatalog
 from asset_store import CATEGORIES, IMAGE_EXTS, KINDS, AssetStore, make_key, slugify
 from config_loader import ConfigFile, check_types
 from image_providers import MIME_EXT, ImageRequest, ProviderError, load_provider
@@ -143,10 +144,50 @@ class Pipeline:
         return out
 
     # ── Generation ──
+    def _ready_provider(self, name: str, unavailable: "dict[str, str]", log: Callable[[str], None]):
+        """The provider if it can generate now; else None (remembered in `unavailable`)."""
+        if name in unavailable:
+            return None
+        try:
+            prov = self.provider(name)
+            ok, why = prov.available()
+        except ProviderError as e:
+            ok, why = False, str(e)
+        if not ok:
+            unavailable[name] = why
+            log(f"! provider '{name}' unavailable: {why}")
+            return None
+        return prov
+
+    @staticmethod
+    def _request(prov, prompt: str, kind: str, size: "list[int]"):
+        """One provider call; raises on any failure, including an unusable image."""
+        w, h = size
+        result = prov.generate(ImageRequest(prompt=prompt, kind=kind, width=w, height=h))
+        if not MIME_EXT.get(result.mime) or not result.data:
+            raise ProviderError(f"unsupported image type {result.mime!r}")
+        return result
+
+    def _store_image(self, key: str, kind: str, result, size: "list[int]") -> str:
+        """Post-process and write one image; returns its path relative to the assets root."""
+        data, mime = postprocess(result.data, result.mime, *size)
+        rel = f"{kind}s/{key.partition(':')[2]}{MIME_EXT.get(mime, MIME_EXT[result.mime])}"
+        _write_atomic(os.path.join(self.store.global_root, rel), data)
+        return rel
+
+    def _has_specific_image(self, key: str) -> bool:
+        """An image exists that is not a generic seed (a generic one may be replaced)."""
+        found = self.store.find(key)
+        return bool(found and not found["entry"].get("generic"))
+
     def generate(self, limit: Optional[int] = None, provider: Optional[str] = None,
                  keys: Optional[Iterable[str]] = None, dry_run: bool = False,
                  log: Callable[[str], None] = print) -> dict:
-        """Work through pending entries. Returns {"done", "failed", "planned", "blocked"}."""
+        """Work through pending entries. Returns {"done", "failed", "planned", "blocked"}.
+
+        A key whose only image is a generic seed is generated anyway: the
+        wait-list entry is the specific version and replaces the generic one.
+        """
         cfg = self.config.get()
         sizes = cfg.get("sizes", {})
         max_attempts = int(cfg.get("max_attempts", 3))
@@ -159,7 +200,7 @@ class Pipeline:
         unavailable: "dict[str, str]" = {}
         for entry in entries:
             key, kind = entry["key"], entry.get("kind", "item")
-            if self.store.find(key):
+            if self._has_specific_image(key):
                 self.queue.update(key, status="done", last_error=None)
                 log(f"= {key}: already has an image")
                 continue
@@ -168,27 +209,15 @@ class Pipeline:
             if dry_run:
                 summary["planned"].append({"key": key, "provider": name, "prompt": prompt})
                 continue
-            if name in unavailable:
+            prov = self._ready_provider(name, unavailable, log)
+            if prov is None:
                 summary["blocked"].append(key)
-                continue
-            try:
-                prov = self.provider(name)
-                ok, why = prov.available()
-            except ProviderError as e:
-                ok, why = False, str(e)
-            if not ok:
-                unavailable[name] = why
-                summary["blocked"].append(key)
-                log(f"! provider '{name}' unavailable: {why}")
                 continue
 
-            w, h = sizes.get(kind, [512, 512])
+            size = sizes.get(kind, [512, 512])
             attempts = int(entry.get("attempts") or 0) + 1
             try:
-                result = prov.generate(ImageRequest(prompt=prompt, kind=kind, width=w, height=h))
-                ext = MIME_EXT.get(result.mime)
-                if not ext or not result.data:
-                    raise ProviderError(f"unsupported image type {result.mime!r}")
+                result = self._request(prov, prompt, kind, size)
             except Exception as e:   # provider bugs must not abort the whole batch
                 retry = attempts < max_attempts
                 self.queue.update(key, status="pending" if retry else "failed",
@@ -197,15 +226,76 @@ class Pipeline:
                 log(f"✗ {key}: {e}" + (" (will retry)" if retry else " (giving up)"))
                 continue
 
-            data, mime = postprocess(result.data, result.mime, w, h)
-            rel = f"{kind}s/{key.partition(':')[2]}{MIME_EXT.get(mime, ext)}"
-            _write_atomic(os.path.join(self.store.global_root, rel), data)
+            rel = self._store_image(key, kind, result, size)
             self.store.global_manifest.set_entry(key, {
                 "file": rel, "name": entry.get("name"), "category": entry.get("category"),
                 "source": name, "model": result.meta.get("model"), "prompt": prompt,
                 "created": _now(),
             })
             self.queue.update(key, status="done", attempts=attempts, last_error=None, prompt=prompt)
+            summary["done"].append(key)
+            log(f"✓ {key} → {rel}")
+        return summary
+
+    # ── Seeding (campaign-independent standard content) ──
+    def seed(self, catalog: SeedCatalog, sets: Optional[Iterable[str]] = None,
+             limit: Optional[int] = None, provider: Optional[str] = None,
+             dry_run: bool = False, log: Callable[[str], None] = print) -> dict:
+        """Generate catalogue entries that have no image yet.
+
+        Never replaces an existing image (generic or specific) and leaves
+        keys alone that are pending on the wait-list — those get their
+        specific image from generate(). Failures are not recorded: the next
+        seed run simply tries again. `limit` counts images to make; skipped
+        entries do not use it up.
+
+        Returns {"done", "failed", "planned", "blocked", "existing", "queued"}.
+        """
+        cfg = self.config.get()
+        sizes = cfg.get("sizes", {})
+        waiting = {e["key"] for e in self.queue.entries("pending")}
+        summary = {"done": [], "failed": [], "planned": [], "blocked": [],
+                   "existing": [], "queued": []}
+        unavailable: "dict[str, str]" = {}
+        budget = None if limit is None else max(0, limit)
+        for entry in catalog.entries(sets):
+            key, kind = entry["key"], entry["kind"]
+            if self.store.find(key):
+                summary["existing"].append(key)
+                continue
+            if key in waiting:
+                summary["queued"].append(key)
+                continue
+            if budget is not None:
+                if budget == 0:
+                    break
+                budget -= 1
+            name = self.provider_name(kind, provider)
+            prompt = build_prompt(entry, cfg)
+            if dry_run:
+                summary["planned"].append({"key": key, "provider": name, "prompt": prompt})
+                continue
+            prov = self._ready_provider(name, unavailable, log)
+            if prov is None:
+                summary["blocked"].append(key)
+                continue
+
+            size = sizes.get(kind, [512, 512])
+            try:
+                result = self._request(prov, prompt, kind, size)
+            except Exception as e:   # one bad image must not stop the batch
+                summary["failed"].append(key)
+                log(f"✗ {key}: {e}")
+                continue
+
+            rel = self._store_image(key, kind, result, size)
+            record = {"file": rel, "name": entry["name"], "category": entry["category"],
+                      "source": name, "model": result.meta.get("model"), "prompt": prompt,
+                      "generic": True, "seed": entry["set"], "created": _now()}
+            for field in ("srd", "template"):
+                if entry.get(field):
+                    record[field] = entry[field]
+            self.store.global_manifest.set_entry(key, record, aliases=entry["aliases"])
             summary["done"].append(key)
             log(f"✓ {key} → {rel}")
         return summary

@@ -432,7 +432,12 @@ $A generate --limit 10                      # generate, update manifest, refresh
 $A add "item:Dolch" ~/Bilder/dolch.png --category weapon   # use your own image
 $A skip "Seil (50 ft)"                      # never generate this one
 $A retry                                    # failed entries back to pending
+$A seed --dry-run                           # standard catalogue: what would be generated
+$A seed --category items --limit 20         # SRD equipment / portraits / maps ahead of play
+$A prompt "Langschwert" "A longsword with a wolf-head pommel" --add   # specific version replaces the generic one
 ```
+
+`seed` generates campaign-independent standard content from `display/config/asset-seed.json` (override in `<data-root>/config/`, entries keyed by slug, `null` removes one): SRD equipment with German names (English SRD names as aliases), archetype portraits (`token:elfische-magierin`, `token:goblin`) and map backgrounds per scene type (`map:taverne`, with the matching map template). The images land in the same manifest marked `"generic": true`. A seed never replaces an existing image and skips keys pending on the wait-list; a specific image for the same key (`generate` of a wait-list entry, or `add`) replaces the generic one.
 
 Categories: `weapon armor potion scroll ring wand wondrous tool gear pc npc enemy map`. Failed generations are retried up to `max_attempts` (default 3), then marked `failed`. A provider that is not ready (e.g. missing API key) blocks its entries without using up attempts.
 

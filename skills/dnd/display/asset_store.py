@@ -28,7 +28,7 @@ import sys
 import tempfile
 import threading
 import unicodedata
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 PLACEHOLDER_DIR = os.path.join(_HERE, "assets", "placeholders")
@@ -137,8 +137,12 @@ class Manifest:
         target = self.data()["aliases"].get(slugify(base_name(kind, name)))
         return target if target and target.startswith(kind + ":") else None
 
-    def set_entry(self, key: str, entry: dict) -> None:
-        """Add/replace one entry and write atomically (keeps unknown fields)."""
+    def set_entry(self, key: str, entry: dict, aliases: "Iterable[str]" = ()) -> None:
+        """Add/replace one entry and write atomically (keeps unknown fields).
+
+        `aliases` are other names for the same content; an alias that already
+        points elsewhere is left alone.
+        """
         try:
             with open(self.path, encoding="utf-8-sig") as f:
                 raw = json.load(f)
@@ -147,6 +151,11 @@ class Manifest:
         except FileNotFoundError:
             raw = {"version": 1, "entries": {}, "aliases": {}}
         raw.setdefault("entries", {})[key] = entry
+        kind = key.partition(":")[0]
+        for alias in aliases:
+            slug = slugify(base_name(kind, alias))
+            if slug and slug != key.partition(":")[2]:
+                raw.setdefault("aliases", {}).setdefault(slug, key)
         os.makedirs(self.root, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.root, prefix=".manifest.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
