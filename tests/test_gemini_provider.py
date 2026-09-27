@@ -94,7 +94,7 @@ class GeminiTests(unittest.TestCase):
         self.assertEqual(sent["body"]["model"], "gemini-3.1-flash-lite-image")
         self.assertEqual(sent["body"]["input"], [{"type": "text", "text": "A rusty dagger."}])
         self.assertEqual(sent["body"]["response_format"],
-                         {"type": "image", "mime_type": "image/png", "aspect_ratio": "1:1", "image_size": "1K"})
+                         {"type": "image", "mime_type": "image/jpeg", "aspect_ratio": "1:1", "image_size": "1K"})
 
     def test_other_response_shapes(self):
         shapes = [

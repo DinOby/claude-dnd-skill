@@ -35,7 +35,7 @@
       "model": "gemini-3.1-flash-lite-image",
       "api": "interactions",
       "image_size": "1K",
-      "mime_type": "image/png",
+      "mime_type": "image/jpeg",
       "api_key_env": [
         "DND_IMAGE_KEY",
         "GEMINI_API_KEY"

@@ -7,7 +7,7 @@ Config (config/image-provider.json → providers.gemini):
     api          "interactions" (default, POST /v1beta/interactions) or
                  "generate_content" (POST /v1beta/models/<model>:generateContent)
     image_size   "1K" (default) — "512", "1K", "2K", "4K" where the model allows
-    mime_type    "image/png" (default) or "image/jpeg"
+    mime_type    "image/jpeg" (default; the current image models reject "image/png")
     api_key_env  env vars to read the key from, in order
     key_files    files under ~/.config/claude-dnd/ to try after the env vars
     timeout      seconds (default 120)
@@ -78,7 +78,7 @@ class GeminiProvider:
         self.model = config.get("model", DEFAULT_MODEL)
         self.api = config.get("api", "interactions")
         self.image_size = config.get("image_size", "1K")
-        self.mime_type = config.get("mime_type", "image/png")
+        self.mime_type = config.get("mime_type", "image/jpeg")
         self.env_names = config.get("api_key_env", ["DND_IMAGE_KEY", "GEMINI_API_KEY"])
         self.key_files = config.get("key_files", ["image.key", "tts.key"])
         self.timeout = float(config.get("timeout", 120))
