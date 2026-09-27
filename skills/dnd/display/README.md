@@ -233,7 +233,7 @@ Images are **never generated during play**. Items without an image go on a wait-
 
 ### Battle map (in progress)
 
-The server keeps a battle map for the main display (phones never receive it): `push_stats.py --map-set / --map-show / --stat-move "Flerb:D5" / --token-add / --token-remove / --map-hide`, positions in chess-like notation (`A1` = top-left). Layouts are shared by all campaigns in `<data-root>/maps/library/`; token placement is stored per campaign in `<campaign>/maps/`. `GET /map` returns the current map; changes arrive over SSE as `map` (full) or `map_patch` (with `base`/`rev`). The browser grid view follows in a later step.
+The server keeps a battle map for the main display (phones never receive it): `push_stats.py --map-set / --map-show / --stat-move "Flerb:D5" / --token-add / --token-remove / --map-hide`, positions in chess-like notation (`A1` = top-left). `--map-new TEMPLATE` builds a map from one of the templates in `map-templates/` (own ones in `<data-root>/map-templates/`); tokens without a position go onto the template's spawn zones, `--token-party` adds all player characters. Layouts are shared by all campaigns in `<data-root>/maps/library/`; token placement is stored per campaign in `<campaign>/maps/`. `GET /map` returns the current map; changes arrive over SSE as `map` (full) or `map_patch` (with `base`/`rev`). The browser grid view follows in a later step.
 
 ### Text rendering
 

@@ -1,0 +1,23 @@
+{
+  "name": "Waldweg",
+  "tags": ["forest", "road", "outdoor", "travel"],
+  "cols": 18, "rows": 10, "cell_ft": 5,
+  "background": {"asset": "map:waldweg"},
+  "terrain": [
+    {"at": "A5", "w": 18, "h": 2, "type": "road"},
+    {"at": "B2", "w": 2, "h": 2, "type": "tree"},
+    {"at": "G1", "w": 3, "h": 2, "type": "tree"},
+    {"at": "M2", "w": 2, "h": 2, "type": "tree"},
+    {"at": "C8", "w": 3, "h": 2, "type": "tree"},
+    {"at": "J9", "w": 2, "h": 2, "type": "tree"},
+    {"at": "O8", "w": 2, "h": 2, "type": "tree"},
+    {"at": "E3", "w": 2, "h": 1, "type": "difficult"},
+    {"at": "K3", "w": 2, "h": 1, "type": "difficult"},
+    {"at": "F8", "w": 2, "h": 1, "type": "difficult"}
+  ],
+  "spawn": {
+    "pc": [{"at": "A5", "w": 3, "h": 2}],
+    "npc": [{"at": "H5", "w": 3, "h": 2}],
+    "enemy": [{"at": "P4", "w": 3, "h": 4}, {"at": "I3", "w": 2, "h": 1}]
+  }
+}

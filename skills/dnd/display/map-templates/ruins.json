@@ -1,0 +1,22 @@
+{
+  "name": "Ruinen",
+  "tags": ["ruins", "outdoor", "dungeon"],
+  "cols": 16, "rows": 12, "cell_ft": 5,
+  "background": {"asset": "map:ruinen"},
+  "terrain": [
+    {"at": "C3", "w": 5, "h": 1, "type": "wall"},
+    {"at": "C4", "w": 1, "h": 3, "type": "wall"},
+    {"at": "K2", "w": 1, "h": 3, "type": "wall"},
+    {"at": "J9", "w": 4, "h": 1, "type": "wall"},
+    {"at": "G6", "w": 1, "h": 1, "type": "pillar"},
+    {"at": "J6", "w": 1, "h": 1, "type": "pillar"},
+    {"at": "G8", "w": 1, "h": 1, "type": "pillar"},
+    {"at": "H4", "w": 2, "h": 1, "type": "difficult"},
+    {"at": "D9", "w": 2, "h": 2, "type": "difficult"}
+  ],
+  "spawn": {
+    "pc": [{"at": "A10", "w": 3, "h": 3}],
+    "npc": [{"at": "G7", "w": 3, "h": 1}],
+    "enemy": [{"at": "M2", "w": 3, "h": 4}]
+  }
+}

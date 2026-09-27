@@ -51,8 +51,11 @@ MAX_CELLS = 60                       # per side; a TV cannot show more legibly
 TOKEN_KINDS = ("pc", "npc", "enemy", "object")
 MAX_TOKEN_SIZE = 4                   # gargantuan
 BLOCKING_TERRAIN = ("wall",)         # ending a move here is only a warning
+# Auto-placement avoids every terrain cell except these (you can stand there).
+WALKABLE_TERRAIN = ("difficult", "door", "stairs", "road", "rug", "bridge", "shallow-water")
+SPAWN_KINDS = ("pc", "npc", "enemy")  # object tokens use the npc zone
 LAYOUT_FIELDS = ("id", "name", "template", "tags", "cols", "rows", "cell_ft",
-                 "background", "terrain")
+                 "background", "terrain", "spawn")
 _TOKEN_FIELDS = ("id", "name", "kind", "x", "y", "size", "asset", "archetype", "hidden")
 
 _COORD = re.compile(r"^\s*([A-Za-z]{1,2})\s*(\d{1,3})\s*$")
@@ -174,7 +177,7 @@ def _norm_terrain(raw, cols: int, rows: int, problems: "list[str]") -> "list[dic
 
 
 def _norm_token(raw, cols: int, rows: int, taken: "set[str]", where: str,
-                problems: "list[str]") -> Optional[dict]:
+                problems: "list[str]", allow_unplaced: bool = False) -> Optional[dict]:
     if isinstance(raw, str):
         raw = {"name": raw}
     if not isinstance(raw, dict):
@@ -193,9 +196,12 @@ def _norm_token(raw, cols: int, rows: int, taken: "set[str]", where: str,
     if not (_is_int(size) and 1 <= size <= MAX_TOKEN_SIZE):
         problems.append(f"{where} ({name}): size should be 1–{MAX_TOKEN_SIZE} cells")
         return None
-    pos = _position(raw, f"{where} ({name})", problems)
-    if pos is None:
-        return None
+    if allow_unplaced and not any(k in raw for k in ("at", "to", "x", "y")):
+        pos = (None, None)                       # placed later on a spawn zone
+    else:
+        pos = _position(raw, f"{where} ({name})", problems)
+        if pos is None:
+            return None
     base = raw.get("id") if isinstance(raw.get("id"), str) and slug(raw["id"]) else name
     tid = slug(base)
     if not tid:
@@ -211,10 +217,49 @@ def _norm_token(raw, cols: int, rows: int, taken: "set[str]", where: str,
             tok[field] = raw[field].strip()
     if raw.get("hidden") is True:
         tok["hidden"] = True
-    _check_rect({"x": tok["x"], "y": tok["y"], "w": size, "h": size}, cols, rows,
-                f"{where} ({name})", problems)
+    if tok["x"] is not None:
+        _check_rect({"x": tok["x"], "y": tok["y"], "w": size, "h": size}, cols, rows,
+                    f"{where} ({name})", problems)
     taken.add(tid)
     return tok
+
+
+def _norm_spawn(raw, cols: int, rows: int, problems: "list[str]") -> "dict[str, list[dict]]":
+    """{"pc": [rect…], "enemy": […], "npc": […]} — where new tokens appear by kind."""
+    out: "dict[str, list[dict]]" = {}
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        problems.append("spawn should be an object like {\"pc\": [{\"at\": \"B8\", \"w\": 3}]}")
+        return out
+    for kind, rects in raw.items():
+        if kind not in SPAWN_KINDS:
+            problems.append(f"spawn: unknown kind '{kind}' (use {', '.join(SPAWN_KINDS)})")
+            continue
+        if isinstance(rects, dict):
+            rects = [rects]
+        if not isinstance(rects, list):
+            problems.append(f"spawn.{kind} should be a list of areas")
+            continue
+        zone = []
+        for i, r in enumerate(rects):
+            where = f"spawn.{kind}[{i}]"
+            if not isinstance(r, dict):
+                problems.append(f"{where} should be an area like {{\"at\": \"B8\", \"w\": 3, \"h\": 2}}")
+                continue
+            pos = _position(r, where, problems)
+            w, h = r.get("w", 1), r.get("h", 1)
+            if not (_is_int(w) and _is_int(h) and w >= 1 and h >= 1):
+                problems.append(f"{where}: w/h should be whole numbers ≥ 1")
+                continue
+            if pos is None:
+                continue
+            rect = {"x": pos[0], "y": pos[1], "w": w, "h": h}
+            _check_rect(rect, cols, rows, where, problems)
+            zone.append(rect)
+        if zone:
+            out[kind] = zone
+    return out
 
 
 def normalize_map(raw: dict) -> dict:
@@ -247,6 +292,7 @@ def normalize_map(raw: dict) -> dict:
         bg = None
     out["background"] = {"asset": bg["asset"]} if bg else None
     out["terrain"] = _norm_terrain(raw.get("terrain"), cols, rows, problems)
+    out["spawn"] = _norm_spawn(raw.get("spawn"), cols, rows, problems)
     taken: "set[str]" = set()
     tokens_raw = raw.get("tokens", [])
     if not isinstance(tokens_raw, list):
@@ -254,9 +300,11 @@ def normalize_map(raw: dict) -> dict:
         tokens_raw = []
     out["tokens"] = []
     for i, raw_tok in enumerate(tokens_raw):
-        tok = _norm_token(raw_tok, cols, rows, taken, f"tokens[{i}]", problems)
+        tok = _norm_token(raw_tok, cols, rows, taken, f"tokens[{i}]", problems, allow_unplaced=True)
         if tok:
             out["tokens"].append(tok)
+    if not problems:
+        place_tokens(out, [t for t in out["tokens"] if t["x"] is None], problems)
     out["rev"] = raw["rev"] if _is_int(raw.get("rev")) and raw["rev"] >= 0 else 0
     if problems:
         raise MapError(problems)
@@ -279,6 +327,48 @@ def find_token(m: dict, ref: str) -> Optional[dict]:
             return t
     s = slug(ref)
     return next((t for t in m["tokens"] if t["id"] == s), None)
+
+
+def _blocked_cells(m: dict) -> "set[tuple[int, int]]":
+    return {c for t in m["terrain"] if t["type"] not in WALKABLE_TERRAIN for c in _cells_rect(t)}
+
+
+def _occupied_cells(m: dict, skip=()) -> "set[tuple[int, int]]":
+    return {c for t in m["tokens"] if t["x"] is not None and t not in skip
+            for c in _cells(t["x"], t["y"], t["size"])}
+
+
+def place_tokens(m: dict, tokens: "list[dict]", problems: "list[str]") -> None:
+    """Give each token (x is None) a free square: first in its kind's spawn zone
+    (reading order), else the free square nearest to that zone, else nearest
+    to the map centre. Mutates the tokens; adds a problem if the map is full.
+    """
+    blocked = _blocked_cells(m)
+    occupied = _occupied_cells(m, skip=tokens)
+    spawn = m.get("spawn") or {}
+    for tok in tokens:
+        size = tok["size"]
+
+        def free(x, y):
+            if x < 0 or y < 0 or x + size > m["cols"] or y + size > m["rows"]:
+                return False
+            cells = _cells(x, y, size)
+            return not (cells & blocked or cells & occupied)
+
+        zone_kind = tok["kind"] if tok["kind"] in SPAWN_KINDS else "npc"
+        zone = [(r["x"] + dx, r["y"] + dy) for r in spawn.get(zone_kind, [])
+                for dy in range(r["h"]) for dx in range(r["w"])]
+        spot = next(((x, y) for x, y in zone if free(x, y)), None)
+        if spot is None:
+            seeds = zone or [(m["cols"] // 2, m["rows"] // 2)]
+            spot = min(((x, y) for y in range(m["rows"]) for x in range(m["cols"]) if free(x, y)),
+                       key=lambda c: (min(abs(c[0] - sx) + abs(c[1] - sy) for sx, sy in seeds), c[1], c[0]),
+                       default=None)
+        if spot is None:
+            problems.append(f"no free square left for {tok['name']}")
+            continue
+        tok["x"], tok["y"] = spot
+        occupied |= _cells(spot[0], spot[1], size)
 
 
 def _cells(x: int, y: int, size: int):
@@ -350,11 +440,13 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
 
     taken = {t["id"] for t in new["tokens"]}
     for i, raw in enumerate(_as_list(patch.get("add"), "add", problems)):
-        tok = _norm_token(raw, new["cols"], new["rows"], taken, f"add[{i}]", problems)
+        tok = _norm_token(raw, new["cols"], new["rows"], taken, f"add[{i}]", problems, allow_unplaced=True)
         if tok:
             new["tokens"].append(tok)
             applied["add"].append(tok)
             touched.append(tok)
+    if not problems:
+        place_tokens(new, [t for t in applied["add"] if t["x"] is None], problems)
 
     if problems:
         raise MapError(problems)
@@ -363,6 +455,11 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
     new["rev"] = m["rev"] + 1
     applied["rev"] = new["rev"]
     warnings = []
+    before = {t["name"].casefold() for t in new["tokens"] if t not in applied["add"]}
+    for tok in applied["add"]:   # several goblins are normal, a second innkeeper is not
+        if tok["kind"] in ("pc", "npc") and tok["name"].casefold() in before:
+            warnings.append(f"{tok['name']} was already on the map — added another one as '{tok['id']}'")
+        before.add(tok["name"].casefold())
     for tok in touched:
         if tok in new["tokens"]:
             warnings += token_warnings(new, tok)
@@ -399,6 +496,89 @@ def _write_json(path: str, data: dict) -> None:
     os.replace(tmp, path)
 
 
+# ── Templates ─────────────────────────────────────────────────────────────────
+
+DEFAULT_TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "map-templates")
+
+
+class MapTemplates:
+    """Map templates: a layout with spawn zones, no tokens.
+
+    Bundled ones live in display/map-templates/<id>.json; a file with the same
+    id in the user directory (<data-root>/map-templates/) replaces it, new ids
+    add to the list. Files are read on every call — they are small and rare.
+    """
+
+    def __init__(self, dirs: "Optional[list[str]]" = None):
+        self.dirs = dirs if dirs is not None else [DEFAULT_TEMPLATE_DIR]
+
+    def _files(self) -> "dict[str, str]":
+        found: "dict[str, str]" = {}
+        for d in self.dirs:                      # later dirs win
+            try:
+                names = os.listdir(d)
+            except OSError:
+                continue
+            for f in names:
+                if f.endswith(".json"):
+                    found[slug(f[:-5])] = os.path.join(d, f)
+        return found
+
+    def get(self, template_id: str) -> Optional[dict]:
+        """Normalised template (id = template id), or None if unknown/invalid."""
+        path = self._files().get(slug(template_id))
+        raw = _read_json(path) if path else None
+        if raw is None:
+            return None
+        try:
+            return normalize_map(dict(raw, id=slug(template_id), tokens=[]))
+        except MapError:
+            return None
+
+    def problems(self, template_id: str) -> "list[str]":
+        """Why a template file is unusable (for tests and error messages)."""
+        path = self._files().get(slug(template_id))
+        raw = _read_json(path) if path else None
+        if raw is None:
+            return [f"no readable template '{slug(template_id)}'"]
+        try:
+            normalize_map(dict(raw, id=slug(template_id), tokens=[]))
+            return []
+        except MapError as e:
+            return e.problems
+
+    def list(self) -> "list[dict]":
+        out = []
+        for tid in sorted(self._files()):
+            t = self.get(tid)
+            if t:
+                out.append({"id": tid, "name": t["name"], "tags": t["tags"],
+                            "cols": t["cols"], "rows": t["rows"],
+                            "background": t["background"]})
+        return out
+
+
+def expand_template(raw: dict, templates: MapTemplates) -> dict:
+    """{"template": "tavern-small", "id"?, "name"?, "tokens"?, …} → full raw map.
+
+    Fields given in `raw` win over the template's; the map id defaults to the
+    template id. Raw maps with their own cols/rows are returned unchanged.
+    """
+    if not isinstance(raw, dict) or not raw.get("template") or "cols" in raw:
+        return raw
+    tpl = templates.get(str(raw["template"]))
+    if tpl is None:
+        raise MapError([f"unknown map template '{raw['template']}'"
+                        + (f" (available: {', '.join(t['id'] for t in templates.list())})"
+                           if templates.list() else "")])
+    out = {k: v for k, v in tpl.items() if k in LAYOUT_FIELDS}
+    out.update({k: v for k, v in raw.items() if v is not None})
+    out["template"] = tpl["id"]
+    out["id"] = slug(raw.get("id") or "") or tpl["id"]
+    out["name"] = (raw.get("name") or "").strip() or tpl["name"]
+    return out
+
+
 class MapStore:
     """Current map of the display plus its files; thread-safe.
 
@@ -406,9 +586,11 @@ class MapStore:
     tokens of the active campaign (switch with set_placement_dir).
     """
 
-    def __init__(self, library_dir: str, placement_dir: str):
+    def __init__(self, library_dir: str, placement_dir: str,
+                 templates: Optional[MapTemplates] = None):
         self.library_dir = library_dir
         self.placement_dir = placement_dir
+        self.templates = templates or MapTemplates()
         self._lock = threading.Lock()
         self._current: Optional[dict] = None
         self._load_active()
@@ -468,10 +650,22 @@ class MapStore:
     def set_map(self, raw: dict) -> dict:
         """Show a full map; the layout is saved to the library.
 
+        `{"template": "tavern-small", "id": …}` builds the layout from a
+        template — unless the library already has a map with that id: layouts
+        are reused, so then the stored one is shown (an explicit "cols" in raw
+        always means "this is the layout").
         Without a "tokens" key the campaign's saved tokens for this map are
         kept (those that still fit the grid), so re-sending a layout does not
-        clear the board.
+        clear the board. Tokens without a position go onto the spawn zones.
         """
+        if isinstance(raw, dict) and raw.get("template") and "cols" not in raw:
+            map_id = slug(raw.get("id") or "") or slug(str(raw["template"]))
+            stored = _read_json(self._layout_path(map_id))
+            if stored is not None:
+                raw = dict(stored, **{k: v for k, v in raw.items()
+                                      if k in ("tokens", "name") and v is not None}, id=map_id)
+            else:
+                raw = expand_template(raw, self.templates)
         m = normalize_map(raw)
         if isinstance(raw, dict) and "tokens" not in raw:
             saved = (_read_json(self._placement_path(m["id"])) or {}).get("tokens") or []

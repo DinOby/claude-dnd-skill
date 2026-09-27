@@ -1,0 +1,21 @@
+{
+  "name": "Höhleneingang",
+  "tags": ["cave", "underground", "outdoor", "dungeon"],
+  "cols": 16, "rows": 12, "cell_ft": 5,
+  "background": {"asset": "map:hoehle"},
+  "terrain": [
+    {"at": "I1", "w": 8, "h": 4, "type": "wall"},
+    {"at": "I9", "w": 8, "h": 4, "type": "wall"},
+    {"at": "L6", "w": 1, "h": 1, "type": "rock"},
+    {"at": "N7", "w": 1, "h": 1, "type": "rock"},
+    {"at": "O5", "w": 2, "h": 1, "type": "water"},
+    {"at": "B1", "w": 2, "h": 2, "type": "tree"},
+    {"at": "C10", "w": 2, "h": 2, "type": "tree"},
+    {"at": "G5", "w": 2, "h": 4, "type": "difficult"}
+  ],
+  "spawn": {
+    "pc": [{"at": "B5", "w": 3, "h": 4}],
+    "npc": [{"at": "F3", "w": 2, "h": 2}],
+    "enemy": [{"at": "M5", "w": 3, "h": 4}]
+  }
+}

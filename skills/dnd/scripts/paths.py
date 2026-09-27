@@ -131,6 +131,11 @@ def maps_library_dir() -> pathlib.Path:
     return _root() / "maps" / "library"
 
 
+def user_map_templates_dir() -> pathlib.Path:
+    """Own battle-map templates; same id as a bundled one replaces it. Not created on read."""
+    return _root() / "map-templates"
+
+
 def campaigns_dir() -> pathlib.Path:
     """Return the campaigns directory under the configured root."""
     return _root() / "campaigns"

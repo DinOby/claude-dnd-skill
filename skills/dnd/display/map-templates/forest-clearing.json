@@ -1,0 +1,20 @@
+{
+  "name": "Waldlichtung",
+  "tags": ["forest", "outdoor", "travel", "camp"],
+  "cols": 16, "rows": 12, "cell_ft": 5,
+  "background": {"asset": "map:waldlichtung"},
+  "terrain": [
+    {"at": "A1", "w": 16, "h": 1, "type": "tree"},
+    {"at": "A12", "w": 16, "h": 1, "type": "tree"},
+    {"at": "A2", "w": 1, "h": 10, "type": "tree"},
+    {"at": "P2", "w": 1, "h": 10, "type": "tree"},
+    {"at": "G5", "w": 2, "h": 1, "type": "rock"},
+    {"at": "J8", "w": 3, "h": 1, "type": "log"},
+    {"at": "D4", "w": 2, "h": 2, "type": "difficult"}
+  ],
+  "spawn": {
+    "pc": [{"at": "B8", "w": 3, "h": 3}],
+    "npc": [{"at": "G2", "w": 3, "h": 2}],
+    "enemy": [{"at": "L2", "w": 3, "h": 3}]
+  }
+}

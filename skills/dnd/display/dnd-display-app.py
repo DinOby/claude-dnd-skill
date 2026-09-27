@@ -94,11 +94,13 @@ _asset_queue = _PendingQueue(os.path.join(_assets.global_root, "pending-assets.j
 # library, token placement per campaign — see grid_map.py
 import grid_map as _grid_map
 try:
-    from paths import maps_library_dir as _maps_library_dir
-    _MAP_LIBRARY = str(_maps_library_dir())
+    from paths import maps_library_dir as _maps_library_dir, user_map_templates_dir as _user_tpl_dir
+    _MAP_LIBRARY, _MAP_USER_TEMPLATES = str(_maps_library_dir()), str(_user_tpl_dir())
 except Exception:
     _MAP_LIBRARY = os.path.join(os.path.expanduser("~/.claude/dnd"), "maps", "library")
-_maps = _grid_map.MapStore(_MAP_LIBRARY, rt("maps"))
+    _MAP_USER_TEMPLATES = os.path.join(os.path.expanduser("~/.claude/dnd"), "map-templates")
+_maps = _grid_map.MapStore(_MAP_LIBRARY, rt("maps"), templates=_grid_map.MapTemplates(
+    [_grid_map.DEFAULT_TEMPLATE_DIR, _MAP_USER_TEMPLATES]))
 
 
 def _campaign_flag_list(flag: str) -> "Optional[list[str]]":
@@ -2144,8 +2146,17 @@ def assets_changed():
 
 @app.route("/map", methods=["GET"])
 def map_get():
-    """Map on screen (or null) and the layouts in the library."""
-    return jsonify({"map": _maps.current(), "library": _maps.library()})
+    """Map on screen (or null), the layouts in the library and the templates."""
+    return jsonify({"map": _maps.current(), "library": _maps.library(),
+                    "templates": _maps.templates.list()})
+
+
+def _party_tokens(existing: "Optional[dict]") -> list:
+    """Player characters from the stats that are not on the map yet (as pc tokens)."""
+    with _stats_lock:
+        names = [p.get("name") for p in _current_stats.get("players", []) if p.get("name")]
+    on_map = {t["name"].casefold() for t in (existing or {}).get("tokens", [])}
+    return [{"name": n, "kind": "pc"} for n in names if n.casefold() not in on_map]
 
 
 @app.route("/map", methods=["POST"])
@@ -2155,8 +2166,12 @@ def map_post():
     Body, one of:
         {"map": {...full map...}}    show it; layout goes to the library
         {"show": "kessel-schankraum"} show a library map with this campaign's tokens
-        {"patch": {"move": [...], "add": [...], "remove": [...]}}
+        {"patch": {"move": [...], "add": [...], "remove": [...], "add_party": true}}
         {"hide": true}               take the map off screen
+    A map may be {"template": "tavern-small", "id": …} (built from the template,
+    or the stored layout when the library already has that id). Tokens without
+    a position are placed on the template's spawn zones; "add_party" adds every
+    player character from the stats that is not on the map yet.
     Returns {"map_id", "rev", "warnings"}; 400 {"errors": [...]} when rejected
     (a rejected patch changes nothing).
     """
@@ -2176,7 +2191,16 @@ def map_post():
         elif "show" in data:
             m = _maps.show(str(data["show"]))
         elif "patch" in data:
-            applied, warnings = _maps.patch(data["patch"])
+            patch = data["patch"]
+            if isinstance(patch, dict) and patch.get("add_party"):
+                patch = dict(patch)
+                patch.pop("add_party")
+                party = _party_tokens(_maps.current())
+                patch["add"] = list(patch.get("add") or []) + party
+                if not party and not any(patch.get(k) for k in ("move", "add", "remove")):
+                    return jsonify({"map_id": (_maps.current() or {}).get("id"), "rev": None,
+                                    "warnings": ["every player character is already on the map"]})
+            applied, warnings = _maps.patch(patch)
             _broadcast_main({"map_patch": applied})
             return jsonify({"map_id": applied["map_id"], "rev": applied["rev"], "warnings": warnings})
         else:

@@ -232,6 +232,10 @@ python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --autorun-threshold 0   # rese
 **Battle map (main display only, never phones):** positions are column letter + row number, `A1` = top-left (`D5` = 4th column, 5th row; after `Z` come `AA`, `AB`). The layout (grid, terrain, background) is saved to `<data-root>/maps/library/` and reused by every campaign; which tokens stand on it is saved per campaign in `<campaign>/maps/`.
 ```bash
 PS="python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py"
+# From a template — the usual way. Tokens without a position go onto the template's spawn zones:
+$PS --map-new tavern-small --map-id kessel-schankraum --map-name "Schankraum im Kessel" \
+    --token-party --token-add "Wirtin Hilde" --token-add "Goblin:enemy" --token-add "Goblin:enemy"
+# Own layout:
 $PS --map-set '{"id":"kessel-schankraum","name":"Schankraum","cols":14,"rows":10,
   "background":{"asset":"map:taverne"},
   "terrain":[{"at":"A1","w":14,"type":"wall"},{"at":"F5","w":3,"type":"table"}],
@@ -243,7 +247,9 @@ $PS --token-add '{"name":"Oger","kind":"enemy","at":"H3","size":2}'
 $PS --token-remove "Goblin 2"             # by name or id
 $PS --map-hide
 ```
-Moves, adds and removes in one call apply together or not at all; rejected commands print every reason (`Z99 is outside the 14×10 grid`, `no token 'Geist'`) and exit 1. Warnings (token on a wall, two tokens on one square) are printed but applied. `--map-set` without `tokens` keeps the campaign's saved tokens. The browser grid view comes in a later step; until then the commands only store and broadcast the map.
+Moves, adds and removes in one call apply together or not at all; rejected commands print every reason (`Z99 is outside the 14×10 grid`, `no token 'Geist'`) and exit 1. Warnings (token on a wall, two tokens on one square, a name added twice) are printed but applied. `--map-set` without `tokens` keeps the campaign's saved tokens.
+
+Templates (`display/map-templates/`, own ones or replacements in `<data-root>/map-templates/`): `tavern-small`, `market-square`, `forest-road`, `forest-clearing`, `mountain-pass`, `bridge`, `camp`, `cave-mouth`, `dungeon-corridor`, `ruins` — each with walls/obstacles, spawn zones for `pc`, `enemy` and `npc` (objects use the npc zone) and the matching seed background (`map:taverne`, `map:waldweg`, …). `--map-new` with an id that is already in the library shows the stored layout instead (layouts are reused; the template only seeds a new one). A token without a position (`"Goblin:enemy"`, `"Wirtin Hilde"`) takes the first free square of its zone, or the nearest free square when the zone is full. `--token-party` adds every player character from the stats that is not on the map yet. `GET /map` lists the templates. The browser grid view comes in a later step; until then the commands only store and broadcast the map.
 
 **Player input queue — `display/check_input.py`:**
 ```bash

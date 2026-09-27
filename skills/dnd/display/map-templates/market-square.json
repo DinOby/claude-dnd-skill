@@ -1,0 +1,20 @@
+{
+  "name": "Marktplatz",
+  "tags": ["town", "outdoor", "market"],
+  "cols": 18, "rows": 12, "cell_ft": 5,
+  "background": {"asset": "map:marktplatz"},
+  "terrain": [
+    {"at": "I6", "w": 2, "h": 2, "type": "well"},
+    {"at": "C2", "w": 3, "h": 1, "type": "stall"},
+    {"at": "M2", "w": 3, "h": 1, "type": "stall"},
+    {"at": "C11", "w": 3, "h": 1, "type": "stall"},
+    {"at": "M11", "w": 3, "h": 1, "type": "stall"},
+    {"at": "A1", "w": 1, "h": 3, "type": "wall"},
+    {"at": "R10", "w": 1, "h": 3, "type": "wall"}
+  ],
+  "spawn": {
+    "pc": [{"at": "A5", "w": 2, "h": 4}],
+    "npc": [{"at": "C3", "w": 3, "h": 1}, {"at": "M3", "w": 3, "h": 1}, {"at": "C10", "w": 3, "h": 1}],
+    "enemy": [{"at": "Q4", "w": 2, "h": 5}]
+  }
+}

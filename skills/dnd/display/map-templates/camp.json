@@ -1,0 +1,19 @@
+{
+  "name": "Lagerplatz",
+  "tags": ["camp", "outdoor", "travel", "night"],
+  "cols": 16, "rows": 10, "cell_ft": 5,
+  "background": {"asset": "map:lager"},
+  "terrain": [
+    {"at": "H5", "w": 1, "h": 1, "type": "fire"},
+    {"at": "C2", "w": 3, "h": 2, "type": "tent"},
+    {"at": "M1", "w": 4, "h": 2, "type": "tree"},
+    {"at": "B8", "w": 2, "h": 1, "type": "rock"},
+    {"at": "K7", "w": 3, "h": 2, "type": "wagon"},
+    {"at": "A1", "w": 2, "h": 1, "type": "tree"}
+  ],
+  "spawn": {
+    "pc": [{"at": "F4", "w": 5, "h": 3}],
+    "npc": [{"at": "C4", "w": 3, "h": 1}],
+    "enemy": [{"at": "N4", "w": 3, "h": 6}, {"at": "A3", "w": 1, "h": 5}]
+  }
+}

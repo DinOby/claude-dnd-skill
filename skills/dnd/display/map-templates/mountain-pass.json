@@ -1,0 +1,19 @@
+{
+  "name": "Gebirgspass",
+  "tags": ["mountain", "outdoor", "travel"],
+  "cols": 18, "rows": 10, "cell_ft": 5,
+  "background": {"asset": "map:gebirgspass"},
+  "terrain": [
+    {"at": "A1", "w": 18, "h": 2, "type": "cliff"},
+    {"at": "A9", "w": 18, "h": 2, "type": "cliff"},
+    {"at": "F4", "w": 2, "h": 1, "type": "rock"},
+    {"at": "L6", "w": 1, "h": 2, "type": "rock"},
+    {"at": "I3", "w": 1, "h": 1, "type": "rock"},
+    {"at": "N4", "w": 2, "h": 2, "type": "difficult"}
+  ],
+  "spawn": {
+    "pc": [{"at": "A4", "w": 2, "h": 4}],
+    "npc": [{"at": "H6", "w": 3, "h": 2}],
+    "enemy": [{"at": "Q4", "w": 2, "h": 4}, {"at": "K3", "w": 3, "h": 1}]
+  }
+}

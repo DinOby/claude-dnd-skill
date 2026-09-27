@@ -1,0 +1,24 @@
+{
+  "name": "Kleine Taverne",
+  "tags": ["tavern", "indoor", "town", "small"],
+  "cols": 14, "rows": 10, "cell_ft": 5,
+  "background": {"asset": "map:taverne"},
+  "terrain": [
+    {"at": "A1", "w": 14, "h": 1, "type": "wall"},
+    {"at": "A10", "w": 6, "h": 1, "type": "wall"},
+    {"at": "G10", "w": 2, "h": 1, "type": "door"},
+    {"at": "I10", "w": 6, "h": 1, "type": "wall"},
+    {"at": "A2", "w": 1, "h": 8, "type": "wall"},
+    {"at": "N2", "w": 1, "h": 8, "type": "wall"},
+    {"at": "B2", "w": 5, "h": 1, "type": "bar"},
+    {"at": "M4", "w": 1, "h": 2, "type": "fireplace"},
+    {"at": "E5", "w": 2, "h": 1, "type": "table"},
+    {"at": "I5", "w": 2, "h": 1, "type": "table"},
+    {"at": "F8", "w": 2, "h": 1, "type": "table"}
+  ],
+  "spawn": {
+    "pc": [{"at": "B8", "w": 4, "h": 2}],
+    "npc": [{"at": "B3", "w": 5, "h": 1}],
+    "enemy": [{"at": "J7", "w": 4, "h": 3}]
+  }
+}

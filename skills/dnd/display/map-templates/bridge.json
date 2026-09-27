@@ -1,0 +1,20 @@
+{
+  "name": "Brücke",
+  "tags": ["river", "outdoor", "travel", "bridge"],
+  "cols": 18, "rows": 10, "cell_ft": 5,
+  "background": {"asset": "map:bruecke"},
+  "terrain": [
+    {"at": "H1", "w": 4, "h": 4, "type": "water"},
+    {"at": "H7", "w": 4, "h": 4, "type": "water"},
+    {"at": "H5", "w": 4, "h": 2, "type": "bridge"},
+    {"at": "G1", "w": 1, "h": 4, "type": "difficult"},
+    {"at": "L7", "w": 1, "h": 4, "type": "difficult"},
+    {"at": "B1", "w": 2, "h": 2, "type": "tree"},
+    {"at": "P8", "w": 2, "h": 2, "type": "tree"}
+  ],
+  "spawn": {
+    "pc": [{"at": "B5", "w": 3, "h": 2}],
+    "npc": [{"at": "I5", "w": 2, "h": 2}],
+    "enemy": [{"at": "N4", "w": 3, "h": 4}]
+  }
+}

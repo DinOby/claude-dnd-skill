@@ -71,9 +71,13 @@ Usage:
     python3 push_stats.py --map-set '{"id":"kessel-schankraum","cols":14,"rows":10,"terrain":[...],"tokens":[...]}'
     python3 push_stats.py --map-set @map.json               # same, from a file
     python3 push_stats.py --map-show kessel-schankraum       # library layout + this campaign's tokens
+    python3 push_stats.py --map-new tavern-small --map-id kessel-schankraum --map-name "Schankraum im Kessel"
+                                                             # from a template (stored layout if the id exists)
+    python3 push_stats.py --token-party                      # all player characters onto the pc spawn zone
+    python3 push_stats.py --token-add "Goblin:enemy"         # no position -> free square in the enemy zone
     python3 push_stats.py --map-hide
     python3 push_stats.py --stat-move "Flerb:D5" --stat-move "Goblin 1:E6"
-    python3 push_stats.py --token-add "Goblin 2:E7:enemy"    # NAME:POS[:pc|npc|enemy|object]
+    python3 push_stats.py --token-add "Goblin 2:E7:enemy"    # NAME[:POS][:pc|npc|enemy|object]
     python3 push_stats.py --token-add '{"name":"Oger","kind":"enemy","at":"H3","size":2}'
     python3 push_stats.py --token-remove "Goblin 1"
     # Move/add/remove in one call apply together or not at all; problems are printed.
@@ -83,6 +87,7 @@ import sys
 import json
 import argparse
 import os
+import re
 import ssl
 import time
 import urllib.error
@@ -162,20 +167,33 @@ def _post_map(body: dict, token: str) -> int:
     return 0
 
 
+_KINDS = ("pc", "npc", "enemy", "object")
+_POS_RE = re.compile(r"^[A-Za-z]{1,2}\d{1,3}$")
+
+
 def _token_spec(spec: str) -> dict:
-    """'Goblin 2:E7[:enemy]' or a JSON object → token for a map patch."""
+    """'Goblin 2:E7:enemy', 'Goblin:enemy', 'Wirtin Hilde:B3', 'Wirtin Hilde' or JSON → token.
+
+    Without a position the server puts the token on a free square of its
+    kind's spawn zone.
+    """
     spec = spec.strip()
     if spec.startswith("{"):
         return json.loads(spec)
-    parts = spec.rsplit(":", 2)
-    if len(parts) == 3 and parts[2].strip().lower() in ("pc", "npc", "enemy", "object"):
-        name, pos, kind = parts[0], parts[1], parts[2].strip().lower()
-    else:
-        name, _, pos = spec.rpartition(":")
-        kind = "npc"
-    if not name.strip() or not pos.strip():
-        raise ValueError(f"expected NAME:POSITION[:KIND], got {spec!r}")
-    return {"name": name.strip(), "at": pos.strip(), "kind": kind}
+    parts = spec.split(":")
+    kind = "npc"
+    if len(parts) > 1 and parts[-1].strip().lower() in _KINDS:
+        kind = parts.pop().strip().lower()
+    pos = None
+    if len(parts) > 1 and (_POS_RE.match(parts[-1].strip()) or not parts[-1].strip()):
+        pos = parts.pop().strip() or None
+    name = ":".join(parts).strip()
+    if not name:
+        raise ValueError(f"expected NAME[:POSITION][:KIND], got {spec!r}")
+    tok = {"name": name, "kind": kind}
+    if pos:
+        tok["at"] = pos
+    return tok
 
 
 def _move_spec(spec: str) -> dict:
@@ -198,6 +216,15 @@ def _map_body(args) -> "tuple[list[dict], Optional[str]]":
             bodies.append({"map": json.loads(raw)})
         if args.map_show:
             bodies.append({"show": args.map_show})
+        if args.map_new:
+            new = {"template": args.map_new}
+            if args.map_id:
+                new["id"] = args.map_id
+            if args.map_name:
+                new["name"] = args.map_name
+            bodies.append({"map": new})
+        elif args.map_id or args.map_name:
+            raise ValueError("--map-id/--map-name need --map-new TEMPLATE")
         patch = {}
         if args.stat_move:
             patch["move"] = [_move_spec(s) for s in args.stat_move]
@@ -205,6 +232,8 @@ def _map_body(args) -> "tuple[list[dict], Optional[str]]":
             patch["add"] = [_token_spec(s) for s in args.token_add]
         if args.token_remove:
             patch["remove"] = [s.strip() for s in args.token_remove]
+        if args.token_party:
+            patch["add_party"] = True
         if patch:
             bodies.append({"patch": patch})
         if args.map_hide:
@@ -293,10 +322,17 @@ def main() -> None:
     parser.add_argument("--map-show", metavar="ID",
                         help="Show a map from the library with this campaign's tokens")
     parser.add_argument("--map-hide", action="store_true", help="Take the battle map off screen")
+    parser.add_argument("--map-new", metavar="TEMPLATE",
+                        help="Show a map built from a template (tavern-small, forest-road, ...); "
+                             "an existing library map with the same id is reused")
+    parser.add_argument("--map-id", metavar="ID", help="Id for --map-new (default: the template id)")
+    parser.add_argument("--map-name", metavar="NAME", help="Display name for --map-new")
+    parser.add_argument("--token-party", action="store_true",
+                        help="Put every player character that is not on the map onto the pc spawn zone")
     parser.add_argument("--stat-move", metavar="NAME:POS", action="append",
                         help='Move a token, e.g. "Flerb:D5" (repeatable)')
-    parser.add_argument("--token-add", metavar="NAME:POS[:KIND]", action="append",
-                        help='Add a token, e.g. "Goblin 2:E7:enemy", or a JSON object (repeatable)')
+    parser.add_argument("--token-add", metavar="NAME[:POS][:KIND]", action="append",
+                        help='Add a token, e.g. "Goblin 2:E7:enemy" or "Goblin:enemy" (spawn zone), or JSON (repeatable)')
     parser.add_argument("--token-remove", metavar="NAME", action="append",
                         help="Remove a token by name or id (repeatable)")
     args = parser.parse_args()

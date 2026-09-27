@@ -69,7 +69,7 @@ class NormalizeTests(unittest.TestCase):
         text = " | ".join(cm.exception.problems)
         for needle in ("terrain[0]: N10 (size 2×1) is outside the 14×10 grid", "terrain[1]: needs a \"type\"",
                        "tokens[0] (Oger): N10 (size 2×2) is outside", "kind should be one of",
-                       "tokens[2] (Y): position missing", "tokens[3] (Z): Q99 (size 1×1) is outside"):
+                       "tokens[3] (Z): Q99 (size 1×1) is outside"):
             self.assertIn(needle, text)
 
     def test_size_limits_and_id(self):
@@ -179,6 +179,123 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(gm.MapStore(str(self.lib), str(self.camp_a)).current())
 
 
+class TemplateTests(unittest.TestCase):
+    def setUp(self):
+        self.templates = gm.MapTemplates()
+
+    def test_bundled_templates_are_valid_and_match_the_seed_maps(self):
+        listed = self.templates.list()
+        ids = {t["id"] for t in listed}
+        self.assertEqual(ids, {"tavern-small", "market-square", "forest-road", "forest-clearing", "mountain-pass",
+                               "bridge", "camp", "cave-mouth", "dungeon-corridor", "ruins"})
+        for f in os.listdir(gm.DEFAULT_TEMPLATE_DIR):
+            self.assertEqual(self.templates.problems(f[:-5]), [], f)
+        seed = json.loads((DISPLAY / "config" / "asset-seed.json").read_text(encoding="utf-8"))["maps"]
+        by_template = {e["template"]: f"map:{slug}" for slug, e in seed.items()}
+        for t in listed:
+            self.assertEqual(t["background"], {"asset": by_template[t["id"]]}, t["id"])
+
+    def test_every_spawn_zone_has_room(self):
+        for t in self.templates.list():
+            m = self.templates.get(t["id"])
+            blocked = gm._blocked_cells(m)
+            for kind in gm.SPAWN_KINDS:
+                zone = {(r["x"] + dx, r["y"] + dy) for r in m["spawn"].get(kind, [])
+                        for dx in range(r["w"]) for dy in range(r["h"])}
+                self.assertGreaterEqual(len(zone - blocked), 3, f"{t['id']}.{kind}")
+
+    def test_user_template_overrides_and_adds(self):
+        user = Path(tempfile.mkdtemp())
+        (user / "tavern-small.json").write_text(json.dumps({"name": "Meine Taverne", "cols": 5, "rows": 5}),
+                                                encoding="utf-8")
+        (user / "broken.json").write_text("{", encoding="utf-8")
+        t = gm.MapTemplates([gm.DEFAULT_TEMPLATE_DIR, str(user)])
+        self.assertEqual(t.get("tavern-small")["name"], "Meine Taverne")
+        self.assertNotIn("broken", [x["id"] for x in t.list()])
+        self.assertIsNone(t.get("nope"))
+
+
+class PlacementTests(unittest.TestCase):
+    def setUp(self):
+        self.templates = gm.MapTemplates()
+
+    def build(self, template="tavern-small", **raw):
+        return gm.normalize_map(gm.expand_template(dict(raw, template=template), self.templates))
+
+    def test_tokens_without_position_use_their_zone(self):
+        m = self.build(id="kessel-schankraum", name="Schankraum im Kessel", tokens=[
+            {"name": "Flerb", "kind": "pc"}, {"name": "Mira", "kind": "pc"},
+            {"name": "Goblin", "kind": "enemy"}, {"name": "Wirtin Hilde"}, {"name": "Kiste", "kind": "object"},
+            {"name": "Oger", "kind": "enemy", "size": 2}])
+        self.assertEqual((m["id"], m["name"], m["template"]), ("kessel-schankraum", "Schankraum im Kessel", "tavern-small"))
+        pos = {t["id"]: gm.format_coord(t["x"], t["y"]) for t in m["tokens"]}
+        self.assertEqual(pos, {"flerb": "B8", "mira": "C8", "goblin": "J7", "wirtin-hilde": "B3",
+                               "kiste": "C3", "oger": "K7"})
+        for t in m["tokens"]:
+            self.assertEqual(gm.token_warnings(m, t), [], t["name"])
+
+    def test_full_zone_spills_to_the_nearest_free_square(self):
+        m = self.build(tokens=[{"name": f"Held {i}", "kind": "pc"} for i in range(10)])
+        blocked, seen = gm._blocked_cells(m), set()
+        for t in m["tokens"]:
+            cell = (t["x"], t["y"])
+            self.assertNotIn(cell, blocked)
+            self.assertNotIn(cell, seen)
+            seen.add(cell)
+        self.assertEqual(sum(1 for t in m["tokens"] if t["y"] >= 7 and 1 <= t["x"] <= 4), 8)   # zone B8:E9 full
+
+    def test_map_without_spawn_and_full_map(self):
+        m = gm.normalize_map({"id": "leer", "cols": 5, "rows": 5, "tokens": [{"name": "A"}]})
+        self.assertEqual((m["tokens"][0]["x"], m["tokens"][0]["y"]), (2, 2))          # centre
+        with self.assertRaises(gm.MapError) as cm:
+            gm.normalize_map({"id": "eng", "cols": 1, "rows": 1, "tokens": [{"name": "A"}, {"name": "B"}]})
+        self.assertIn("no free square left for B", cm.exception.problems)
+
+    def test_patch_add_without_position(self):
+        m = self.build(tokens=[{"name": "Goblin", "kind": "enemy", "at": "J7"}])
+        new, applied, _ = gm.apply_patch(m, {"add": [{"name": "Goblin", "kind": "enemy"}]})
+        self.assertEqual((applied["add"][0]["id"], gm.format_coord(applied["add"][0]["x"], applied["add"][0]["y"])),
+                         ("goblin-2", "K7"))
+        _, _, warnings = gm.apply_patch(new, {"add": [{"name": "Wirtin Hilde"}, {"name": "wirtin hilde"}]})
+        self.assertEqual(warnings, ["wirtin hilde was already on the map — added another one as 'wirtin-hilde-2'"])
+
+    def test_bad_spawn(self):
+        with self.assertRaises(gm.MapError) as cm:
+            gm.normalize_map({"id": "x", "cols": 5, "rows": 5,
+                              "spawn": {"pc": [{"at": "E5", "w": 2}], "dragon": [], "npc": "A1"}})
+        text = " | ".join(cm.exception.problems)
+        self.assertIn("spawn.pc[0]: E5 (size 2×1) is outside", text)
+        self.assertIn("unknown kind 'dragon'", text)
+        self.assertIn("spawn.npc should be a list", text)
+
+    def test_unknown_template(self):
+        with self.assertRaises(gm.MapError) as cm:
+            gm.expand_template({"template": "schloss"}, self.templates)
+        self.assertIn("available: bridge", cm.exception.problems[0])
+
+
+class TemplateStoreTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name)
+        self.lib = base / "library"
+        self.store = gm.MapStore(str(self.lib), str(base / "a"))
+
+    def test_new_from_template_then_reuse_the_stored_layout(self):
+        m = self.store.set_map({"template": "forest-road", "id": "koenigsstrasse-west",
+                                "tokens": [{"name": "Flerb", "kind": "pc"}]})
+        self.assertEqual((m["id"], m["cols"], m["background"]), ("koenigsstrasse-west", 18, {"asset": "map:waldweg"}))
+        # the DM edits the stored layout; a later --map-new with the same id keeps that edit and the tokens
+        layout = json.loads((self.lib / "koenigsstrasse-west.json").read_text(encoding="utf-8"))
+        layout["terrain"].append({"x": 8, "y": 0, "w": 1, "h": 1, "type": "shrine"})
+        (self.lib / "koenigsstrasse-west.json").write_text(json.dumps(layout), encoding="utf-8")
+        again = self.store.set_map({"template": "forest-road", "id": "koenigsstrasse-west"})
+        self.assertEqual(again["terrain"][-1]["type"], "shrine")
+        self.assertEqual([t["id"] for t in again["tokens"]], ["flerb"])
+        self.assertEqual(again["rev"], 2)
+
+
 def _import_app():
     spec = importlib.util.spec_from_file_location("_grid_app_under_test", str(DISPLAY / "dnd-display-app.py"))
     mod = importlib.util.module_from_spec(spec)
@@ -226,6 +343,19 @@ class RouteTests(unittest.TestCase):
         got = self.client.get("/map").get_json()
         self.assertEqual((got["map"], got["library"]), (None, ["kessel-schankraum"]))
 
+    def test_template_and_party(self):
+        with mock.patch.object(self.app, "_current_stats", {"players": [{"name": "Flerb"}, {"name": "Mira"}]}):
+            code, data = self.post({"map": {"template": "camp", "id": "rast"}})
+            self.assertEqual((code, data["map_id"]), (200, "rast"))
+            code, data = self.post({"patch": {"add_party": True, "add": [{"name": "Wolf", "kind": "enemy"}]}})
+            self.assertEqual(code, 200)
+            names = {t["name"] for t in self.app._maps.current()["tokens"]}
+            self.assertEqual(names, {"Flerb", "Mira", "Wolf"})
+            code, data = self.post({"patch": {"add_party": True}})
+            self.assertEqual((code, data["warnings"]), (200, ["every player character is already on the map"]))
+        got = self.client.get("/map").get_json()
+        self.assertIn("tavern-small", [t["id"] for t in got["templates"]])
+
     def test_rejections(self):
         code, data = self.post({"patch": {"move": [{"id": "Flerb", "to": "D5"}]}})
         self.assertEqual(code, 400)
@@ -248,7 +378,8 @@ class PushStatsFlagTests(unittest.TestCase):
         spec.loader.exec_module(cls.ps)
 
     def args(self, **kw):
-        base = dict(map_set=None, map_show=None, map_hide=False, stat_move=None, token_add=None, token_remove=None)
+        base = dict(map_set=None, map_show=None, map_hide=False, stat_move=None, token_add=None, token_remove=None,
+                    map_new=None, map_id=None, map_name=None, token_party=False)
         base.update(kw)
         return SimpleNamespace(**base)
 
@@ -257,6 +388,9 @@ class PushStatsFlagTests(unittest.TestCase):
         self.assertEqual(self.ps._token_spec("Goblin 2:E7:enemy"), {"name": "Goblin 2", "at": "E7", "kind": "enemy"})
         self.assertEqual(self.ps._token_spec("Wirtin Hilde:B3"), {"name": "Wirtin Hilde", "at": "B3", "kind": "npc"})
         self.assertEqual(self.ps._token_spec('{"name":"Oger","at":"H3","size":2}')["size"], 2)
+        self.assertEqual(self.ps._token_spec("Goblin:enemy"), {"name": "Goblin", "kind": "enemy"})
+        self.assertEqual(self.ps._token_spec("Wirtin Hilde"), {"name": "Wirtin Hilde", "kind": "npc"})
+        self.assertEqual(self.ps._token_spec("Flerb::pc"), {"name": "Flerb", "kind": "pc"})
         for bad in ("Flerb", ":D5"):
             with self.assertRaises(ValueError):
                 self.ps._move_spec(bad)
@@ -274,6 +408,13 @@ class PushStatsFlagTests(unittest.TestCase):
         path.write_text(json.dumps({"id": "x", "cols": 3, "rows": 3}), encoding="utf-8")
         self.assertEqual(self.ps._map_body(self.args(map_set="@" + str(path)))[0], [{"map": {"id": "x", "cols": 3, "rows": 3}}])
         self.assertIsNotNone(self.ps._map_body(self.args(map_set="{broken"))[1])
+
+    def test_map_new_and_party(self):
+        bodies, err = self.ps._map_body(self.args(map_new="tavern-small", map_id="kessel", map_name="Kessel",
+                                                  token_party=True))
+        self.assertEqual(bodies, [{"map": {"template": "tavern-small", "id": "kessel", "name": "Kessel"}},
+                                  {"patch": {"add_party": True}}])
+        self.assertIn("--map-new", self.ps._map_body(self.args(map_id="kessel"))[1])
 
 
 if __name__ == "__main__":

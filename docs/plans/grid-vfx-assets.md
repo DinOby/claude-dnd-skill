@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritt 10 fertig, weiter mit 11
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–11 fertig, weiter mit 12
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -267,7 +267,17 @@ Kampf ist kein eigener Zustand; er findet auf der Karte der aktuellen Szene stat
   (`tavern-small`, `market-square`, `forest-road`, `forest-clearing`,
   `mountain-pass`, `bridge`, `camp`, `cave-mouth`, `dungeon-corridor`, `ruins`).
   Vorlagen verweisen als Hintergrund auf die generischen Seed-Karten
-  (`"background": {"asset": "map:taverne"}`).
+  (`"background": {"asset": "map:taverne"}`). Umgesetzt in Schritt 11:
+  `display/map-templates/<id>.json`, eigene oder ersetzende in
+  `<data-root>/map-templates/`; `spawn` ist `{"pc"|"enemy"|"npc": [Bereiche]}`
+  (Objekte nutzen die NSC-Zone) und wird mit dem Aufbau gespeichert.
+- **Platzierung:** Figuren ohne Position kommen auf das erste freie Feld ihrer
+  Zone (Lesereihenfolge, größenbewusst, nicht auf Terrain außer `difficult`,
+  `door`, `stairs`, `road`, `rug`, `bridge`, `shallow-water`), bei voller Zone
+  auf das nächste freie Feld daneben, ohne Zonen nahe der Mitte.
+  `--map-new TEMPLATE --map-id ID` legt eine Karte an — oder zeigt den
+  gespeicherten Aufbau, wenn die Bibliothek die id schon hat.
+  `--token-party` stellt alle Spielercharaktere auf, die noch fehlen.
 - `/dm:dnd maps <list|reset|restore>`: `reset <id>`, `--tag tavern`, `--all`,
   `--keep-image`. Reset archiviert, löscht nie endgültig.
 
