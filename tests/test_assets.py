@@ -15,6 +15,8 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
+from tests.app_isolation import import_app  # noqa: E402
+
 
 REPO = Path(__file__).resolve().parent.parent
 SKILL = REPO / "skills" / "dnd" if (REPO / "skills" / "dnd").is_dir() else REPO
@@ -285,11 +287,7 @@ class QueueTests(unittest.TestCase):
 
 
 def _import_app():
-    spec = importlib.util.spec_from_file_location("_assets_app_under_test", str(DISPLAY / "dnd-display-app.py"))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return import_app("_assets_app_under_test")   # isolated data root, never ~/.claude/dnd
 
 
 class RouteTests(unittest.TestCase):

@@ -22,6 +22,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from tests.app_isolation import import_app  # noqa: E402
+
 
 REPO = Path(__file__).resolve().parent.parent
 DISPLAY = REPO / "skills" / "dnd" / "display"
@@ -31,14 +33,7 @@ def _load_app_module():
     """Import dnd-display-app.py under a unique name. Same pattern as
     test_display_robustness.py — no Flask app boot needed for the helpers
     we exercise."""
-    spec = importlib.util.spec_from_file_location(
-        "_phone_presence_app_under_test", DISPLAY / "dnd-display-app.py"
-    )
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["_phone_presence_app_under_test"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return import_app("_phone_presence_app_under_test")   # isolated data root, never ~/.claude/dnd
 
 
 class PhonePresentTest(unittest.TestCase):

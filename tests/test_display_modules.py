@@ -20,19 +20,14 @@ SKILL = REPO / "skills" / "dnd" if (REPO / "skills" / "dnd").is_dir() else REPO
 DISPLAY = SKILL / "display"
 sys.path.insert(0, str(DISPLAY))
 
+from tests.app_isolation import import_app  # noqa: E402
+
 MODULES_JS = DISPLAY / "static" / "js" / "modules.js"
 INDEX_HTML = DISPLAY / "templates" / "index.html"
 
 
 def _import_app():
-    spec = importlib.util.spec_from_file_location(
-        "_display_modules_app_under_test", str(DISPLAY / "dnd-display-app.py")
-    )
-    mod = importlib.util.module_from_spec(spec)
-    # Flask resolves its root (and so /static) through sys.modules.
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return import_app("_display_modules_app_under_test")   # isolated data root, never ~/.claude/dnd
 
 
 class StaticWiringTests(unittest.TestCase):

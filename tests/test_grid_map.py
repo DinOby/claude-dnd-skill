@@ -300,14 +300,6 @@ class TemplateStoreTests(unittest.TestCase):
         self.assertEqual(again["rev"], 2)
 
 
-def _import_app():
-    spec = importlib.util.spec_from_file_location("_grid_app_under_test", str(DISPLAY / "dnd-display-app.py"))
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
 class RouteTests(IsolatedApp):
     app_module_name = "_grid_app_under_test"
 

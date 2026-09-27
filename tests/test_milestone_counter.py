@@ -17,14 +17,11 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 SKILL = REPO / "skills" / "dnd" if (REPO / "skills" / "dnd").is_dir() else REPO
 sys.path.insert(0, str(SKILL / "display"))
 
+from tests.app_isolation import import_app  # noqa: E402
+
 
 def _import_app():
-    spec = importlib.util.spec_from_file_location(
-        "dnd_display_app", str(SKILL / "display" / "dnd-display-app.py")
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return import_app("dnd_display_app")   # isolated data root, never ~/.claude/dnd
 
 
 class MilestoneCounterTests(unittest.TestCase):
