@@ -1,0 +1,212 @@
+/* grid.css — battle grid on the main display (see static/js/grid.js).
+ *
+ * The panel sits above the narration, between the character sidebar and the
+ * settings column (grid.js copies the text column's side padding). While
+ * body.grid-on is set the narration starts below the panel.
+ */
+
+:root {
+  --grid-h: 58vh;
+  --grid-top: 64px;
+  --grid-line: rgba(232, 200, 130, 0.14);
+  --grid-bg-a: #1d1710;
+  --grid-bg-b: #120e09;
+  --grid-label: rgba(232, 200, 130, 0.55);
+  --grid-pc: #d9a441;
+  --grid-npc: #5fa7a0;
+  --grid-enemy: #c8483c;
+  --grid-object: #8b8b8b;
+}
+:root[data-theme="light"] {
+  --grid-line: rgba(70, 50, 20, 0.18);
+  --grid-bg-a: #efe3c6;
+  --grid-bg-b: #e2d2ab;
+  --grid-label: rgba(70, 50, 20, 0.6);
+}
+
+#grid-panel {
+  position: fixed;
+  top: var(--grid-top);
+  height: var(--grid-h);
+  left: 230px;
+  right: 340px;
+  z-index: 3;                     /* under the narration text (4), over the backdrop */
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+body.grid-on #grid-panel { display: flex; }
+body.grid-on #text-scroll { padding-top: calc(var(--grid-top) + var(--grid-h) + 18px); }
+body.grid-on #scene-indicator { opacity: 0; }
+
+.grid-title {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: clamp(0.8rem, 1.6vmin, 1.1rem);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--grid-label);
+  min-height: 1.3em;
+}
+
+.grid-board {
+  --cell: 40px;
+  --gutter: 32px;
+  position: relative;
+  flex: none;
+}
+
+.grid-labels {
+  position: absolute;
+  display: flex;
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: calc(var(--cell) * 0.34);
+  color: var(--grid-label);
+  user-select: none;
+}
+.grid-labels span { display: flex; align-items: center; justify-content: center; }
+.grid-labels-cols { left: var(--gutter); top: 0; height: var(--gutter); }
+.grid-labels-cols span { width: var(--cell); }
+.grid-labels-rows { left: 0; top: var(--gutter); width: var(--gutter); flex-direction: column; }
+.grid-labels-rows span { height: var(--cell); }
+
+.grid-field {
+  position: absolute;
+  left: var(--gutter);
+  top: var(--gutter);
+  right: 0;
+  bottom: 0;
+  border-radius: 4px;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--grid-line);
+  background: radial-gradient(ellipse at 50% 40%, var(--grid-bg-a), var(--grid-bg-b));
+  overflow: hidden;
+}
+
+/* Floor: the scene's ground texture tiled every 3 squares, grid lines on top. */
+.grid-floor {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px) 0 0 / var(--cell) var(--cell),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px) 0 0 / var(--cell) var(--cell);
+}
+.grid-floor.has-img {
+  --grid-line: rgba(0, 0, 0, 0.28);
+  background:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px) 0 0 / var(--cell) var(--cell),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px) 0 0 / var(--cell) var(--cell),
+    var(--floor) 0 0 / calc(var(--cell) * 3) calc(var(--cell) * 3) repeat;
+}
+
+/* ── Terrain ─────────────────────────────────────────────────────────────── */
+
+.grid-t { position: absolute; background: rgba(150, 150, 150, 0.28); border-radius: 2px; }
+.grid-t-wall, .grid-t-cliff { background: repeating-linear-gradient(45deg, #3b352d 0 6px, #2c2721 6px 12px); }
+.grid-t-bars      { background: repeating-linear-gradient(90deg, transparent 0 7px, #7b7466 7px 10px); }
+.grid-t-door      { background: repeating-linear-gradient(90deg, rgba(196, 150, 84, 0.55) 0 5px, rgba(120, 82, 40, 0.55) 5px 8px);
+                    border: 2px dashed rgba(236, 196, 120, 0.75); }
+.grid-t-table, .grid-t-bar, .grid-t-stall, .grid-t-wagon, .grid-t-log
+                  { background: rgba(120, 78, 38, 0.8); border: 1px solid rgba(60, 38, 16, 0.9); }
+.grid-t-tent      { background: rgba(160, 138, 92, 0.75); }
+.grid-t-fireplace, .grid-t-fire
+                  { background: radial-gradient(circle, #f4a340 0%, #b8421e 55%, rgba(80, 20, 10, 0.8) 100%); }
+.grid-t-water     { background: linear-gradient(160deg, rgba(40, 90, 140, 0.8), rgba(24, 58, 98, 0.85)); }
+.grid-t-shallow-water { background: rgba(60, 120, 160, 0.45); }
+.grid-t-bridge    { background: repeating-linear-gradient(0deg, #7a5530 0 8px, #5c3f22 8px 10px); }
+.grid-t-road      { background: rgba(150, 120, 80, 0.22); border-radius: 0; }
+.grid-t-rug       { background: rgba(130, 40, 40, 0.35); }
+.grid-t-tree      { background: radial-gradient(circle at 50% 50%, rgba(46, 92, 44, 0.95) 0 38%, rgba(28, 60, 28, 0.7) 60%, transparent 72%) 0 0 / var(--cell) var(--cell); }
+.grid-t-rock, .grid-t-pillar, .grid-t-well
+                  { background: radial-gradient(circle, #8d877c 0 45%, #5d584f 60%, transparent 72%) 0 0 / var(--cell) var(--cell); }
+.grid-t-difficult { background: repeating-radial-gradient(circle at 30% 30%, rgba(120, 150, 70, 0.35) 0 3px, transparent 3px 9px); }
+.grid-t-stairs    { background: repeating-linear-gradient(0deg, rgba(160, 150, 130, 0.55) 0 5px, rgba(90, 84, 74, 0.55) 5px 10px); }
+.grid-t-chair     { background: rgba(120, 78, 38, 0.6); border-radius: 30%; transform: scale(0.7); }
+
+/* Sprite pictures replace the drawn look (the background comes inline from grid.js). */
+.grid-t.has-img {
+  border: 0;
+  border-radius: 0;
+  transform: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
+}
+
+/* ── Tokens ──────────────────────────────────────────────────────────────── */
+
+.grid-token {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: transform 450ms cubic-bezier(.3, .7, .2, 1), opacity 300ms ease;
+  --tok: var(--grid-npc);
+}
+.grid-token.entering, .grid-token.leaving { opacity: 0; }
+.grid-kind-pc     { --tok: var(--grid-pc); }
+.grid-kind-enemy  { --tok: var(--grid-enemy); }
+.grid-kind-object { --tok: var(--grid-object); }
+
+.grid-token-disc {
+  width: 82%;
+  height: 82%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Cinzel', Georgia, serif;
+  font-weight: 700;
+  font-size: calc(var(--cell) * 0.36);
+  color: #fff8e6;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--tok) 80%, white) 0%, var(--tok) 55%,
+              color-mix(in srgb, var(--tok) 60%, black) 100%);
+  border: 2px solid color-mix(in srgb, var(--tok) 50%, black);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.grid-kind-object .grid-token-disc { border-radius: 18%; }
+
+/* Portrait instead of initials; the ring keeps the kind's colour. */
+.grid-token.has-img .grid-token-disc {
+  background-color: var(--tok);
+  background-size: cover;
+  background-position: center 20%;
+  border: calc(var(--cell) * 0.07) solid var(--tok);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+
+/* Whose turn it is (turn_order.current). */
+.grid-token-turn { z-index: 2; }
+.grid-token-turn .grid-token-disc {
+  box-shadow: 0 0 0 3px #fff3c4, 0 0 16px 6px color-mix(in srgb, var(--tok) 70%, white);
+  animation: grid-turn 1.6s ease-in-out infinite;
+}
+@keyframes grid-turn {
+  0%, 100% { box-shadow: 0 0 0 3px #fff3c4, 0 0 10px 3px color-mix(in srgb, var(--tok) 70%, white); }
+  50%      { box-shadow: 0 0 0 3px #fff3c4, 0 0 22px 9px color-mix(in srgb, var(--tok) 70%, white); }
+}
+
+.grid-token-name {
+  position: absolute;
+  top: 88%;
+  max-width: calc(var(--cell) * 2.4);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: Georgia, serif;
+  font-size: calc(var(--cell) * 0.24);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #f4e6c4;
+  background: rgba(0, 0, 0, 0.55);
+}
+.grid-token-small .grid-token-name { display: none; }
+:root[data-theme="light"] .grid-token-name { color: #fff8e6; background: rgba(40, 28, 12, 0.7); }
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-token { transition: opacity 200ms ease; }
+  .grid-token-turn .grid-token-disc { animation: none; }
+}
