@@ -156,6 +156,24 @@ class Manifest:
             slug = slugify(base_name(kind, alias))
             if slug and slug != key.partition(":")[2]:
                 raw.setdefault("aliases", {}).setdefault(slug, key)
+        self._write_raw(raw)
+
+    def remove_entry(self, key: str) -> Optional[dict]:
+        """Drop one entry (and aliases pointing at it); returns it, or None if absent."""
+        try:
+            with open(self.path, encoding="utf-8-sig") as f:
+                raw = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(raw, dict) or key not in (raw.get("entries") or {}):
+            return None
+        entry = raw["entries"].pop(key)
+        if isinstance(raw.get("aliases"), dict):
+            raw["aliases"] = {a: k for a, k in raw["aliases"].items() if k != key}
+        self._write_raw(raw)
+        return entry
+
+    def _write_raw(self, raw: dict) -> None:
         os.makedirs(self.root, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.root, prefix=".manifest.", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:

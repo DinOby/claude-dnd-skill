@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–12 fertig, weiter mit 12b
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–12b fertig, weiter mit 13
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -294,7 +294,10 @@ Umgesetzt in Schritt 12 (`display/scene_state.py`, `scripts/travel.py`):
   gespeicherten Aufbau, wenn die Bibliothek die id schon hat.
   `--token-party` stellt alle Spielercharaktere auf, die noch fehlen.
 - `/dm:dnd maps <list|reset|restore>`: `reset <id>`, `--tag tavern`, `--all`,
-  `--keep-image`. Reset archiviert, löscht nie endgültig.
+  `--keep-image`. Reset archiviert, löscht nie endgültig. Umgesetzt in 12b
+  (`scripts/maps.py`): Archiv `<data-root>/maps/archive/<id>/<zeitstempel>/`
+  mit Aufbau und ggf. eigenem Bild `map:<id>`; generische Seed-Bilder und die
+  Belegung der Kampagnen bleiben; `restore` archiviert vorher den aktuellen Stand.
 
 ### Befehle
 

@@ -433,6 +433,21 @@ $T status                   # where the party is, day x/y, event chance
 
 ---
 
+## Battle-Map Library — `scripts/maps.py`
+
+```bash
+M="python3 ${CLAUDE_SKILL_DIR}/scripts/maps.py"
+$M list [--tag tavern] [--json]       # library maps: size, template, image, campaigns using them
+$M list --archived                    # what reset put aside
+$M reset kessel-schankraum [--keep-image] [--dry-run]
+$M reset --tag tavern | --all         # several at once
+$M restore kessel-schankraum [--version 20260927T120000000000Z]
+```
+
+Reset moves the layout — and the location's own image `map:<id>`, unless `--keep-image` — to `<data-root>/maps/archive/<id>/<timestamp>/`; generic seed images are never touched and campaign token placement stays. Restore archives the current layout first, so nothing is lost either way.
+
+---
+
 ## Oracle — `scripts/oracle.py`
 
 Dice-driven solo/improv oracles (Mythic chaos factor, Ironsworn yes/no, Random Event Focus, scene-meaning word pairs). Keeps pacing transparent and rollable instead of invented. Rolls are stdlib-random and seedable (`--seed N`). The chaos factor persists in `state.md → ## Session Flags` as `chaos_factor: N`. Zero LLM calls.

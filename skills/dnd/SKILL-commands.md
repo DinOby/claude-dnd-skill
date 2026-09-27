@@ -532,6 +532,14 @@ Images for items (and later tokens/maps) — generated **between sessions, never
 
 ---
 
+## `/dm:dnd maps [list|reset|restore]`
+Battle-map layouts are shared by all campaigns (`<data-root>/maps/library/`). Script syntax: `SKILL-scripts.md → Battle-Map Library`.
+- No argument / `list [--tag T]` → `maps.py list`; show id, size, template, image (own / generic / none) and which campaigns have tokens on it. `list --archived` shows what reset put aside.
+- `reset <id…> | --tag T | --all [--keep-image]` → run with `--dry-run` first and show what would be archived; **ask before continuing** when more than one map is affected. Then run it. Reset only archives (never deletes); the next `--map-new TEMPLATE --map-id ID` builds the layout fresh. Tokens in the campaigns stay.
+- `restore <id> [version]` → `maps.py restore`; the current layout (if any) is archived first.
+
+---
+
 ## `/dm:dnd list`
 Read `~/.claude/dnd/campaigns/*/state.md`, print summary table: campaign name | last session date | session count.
 
