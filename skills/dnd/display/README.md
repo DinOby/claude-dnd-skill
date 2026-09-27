@@ -220,6 +220,16 @@ Short icon animations for actions in the narration: attack, ranged, spell, heal,
 
 The Action Overlays toggle in the settings column switches overlays per browser; `prefers-reduced-motion` reduces them to a short fade.
 
+### Content images (items, tokens, maps)
+
+Inventory entries on the character sheet show a thumbnail: an image from `<data-root>/assets/manifest.json` if one exists, otherwise a category placeholder (weapon, armor, potion, scroll, ring, wand, wondrous, tool, gear, …). Categories come from the SRD, then from keywords in `config/item-categories.json` (German compound words work: *Flammenschwert* → weapon). Quantities are ignored, so *Heiltrank (2)* uses the *Heiltrank* image.
+
+Images are **never generated during play**. Items without an image go on a wait-list (`<data-root>/assets/pending-assets.json`; mundane gear is left out by default, see `queue_categories`). Between sessions, `/dm:dnd assets generate` (or `scripts/assets.py generate`) works through it; the running display picks up new images automatically.
+
+- **Image service:** `config/image-provider.json` — default `gemini` (`gemini-3.1-flash-lite-image`, ≈ $0.034 per image, needs `GEMINI_API_KEY` or `DND_IMAGE_KEY`), `dummy` for offline tests. The shared `style` prompt keeps all images in one look. Your own back end: a module with `create(config)` in `<data-root>/providers/`, then add it under `providers` in your override.
+- **Own pictures:** `scripts/assets.py add "item:Dolch" dolch.png --category weapon`. A campaign's `assets/` folder (same layout) overrides the global images.
+- **Optional:** with Pillow installed (`pip install pillow`), generated images are downscaled to the configured `sizes`.
+
 ### Text rendering
 
 - DM output is sent chunk by chunk via `send.py` after each narration block

@@ -110,6 +110,7 @@ def _scan() -> list[str]:
                     and "wb" not in window
                     and "os.open" not in line    # fd ops — no Python-level encoding
                     and "fitz.open" not in line  # PyMuPDF binary open
+                    and "Image.open" not in line  # Pillow binary open
                 ):
                     issues.append(
                         f"{f.relative_to(REPO)}:{i}  open() without encoding: {line.strip()[:90]}"

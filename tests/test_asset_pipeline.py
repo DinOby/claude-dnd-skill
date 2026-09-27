@@ -53,6 +53,10 @@ class _Case(unittest.TestCase):
         self.assets = base / "assets"
         self.user_cfg = base / "config"
         self.user_cfg.mkdir()
+        # The bundled default is gemini (needs a key); tests run on the offline
+        # dummy through a user override — which also exercises the override path.
+        (self.user_cfg / "image-provider.json").write_text(
+            json.dumps({"active": {"default": "dummy"}}), encoding="utf-8")
         self.store = AssetStore(global_root=str(self.assets))
         self.queue = PendingQueue(str(self.assets / "pending-assets.json"))
         self.cfg = ConfigFile("image-provider.json", validator=ap.validate_provider_config,
@@ -76,7 +80,7 @@ class ConfigAndPromptTests(_Case):
         (self.user_cfg / "image-provider.json").write_text(
             json.dumps({"active": {"default": "nowhere"}}), encoding="utf-8")
         with redirect_stderr(io.StringIO()):
-            self.assertEqual(self.p.provider_name("item"), "dummy")
+            self.assertEqual(self.p.provider_name("item"), "gemini")   # bundled default
 
     def test_parse_key(self):
         self.assertEqual(ap.parse_key("item:Flammenschwert der Asche"), "item:flammenschwert-der-asche")

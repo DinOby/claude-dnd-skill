@@ -1,7 +1,22 @@
 {
   "version": 1,
-  "active": {"default": "dummy"},
-  "sizes": {"item": [512, 512], "token": [512, 512], "map": [1024, 1024]},
+  "active": {
+    "default": "gemini"
+  },
+  "sizes": {
+    "item": [
+      512,
+      512
+    ],
+    "token": [
+      512,
+      512
+    ],
+    "map": [
+      1024,
+      1024
+    ]
+  },
   "max_attempts": 3,
   "style": {
     "base": "Painted dark-fantasy game art, rich colours, soft rim light, clean composition, no text, no letters, no watermark",
@@ -10,6 +25,25 @@
     "map": "top-down battle map seen from directly above, even lighting, no grid lines, no labels"
   },
   "providers": {
-    "dummy": {"module": "dummy", "size": 128}
+    "gemini": {
+      "module": "gemini",
+      "model": "gemini-3.1-flash-lite-image",
+      "api": "interactions",
+      "image_size": "1K",
+      "mime_type": "image/png",
+      "api_key_env": [
+        "DND_IMAGE_KEY",
+        "GEMINI_API_KEY"
+      ],
+      "key_files": [
+        "image.key",
+        "tts.key"
+      ],
+      "timeout": 120
+    },
+    "dummy": {
+      "module": "dummy",
+      "size": 128
+    }
   }
 }

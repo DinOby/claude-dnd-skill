@@ -77,6 +77,33 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def postprocess(data: bytes, mime: str, width: int, height: int) -> "tuple[bytes, str]":
+    """Downscale to the configured size when Pillow is available; else unchanged.
+
+    Providers often return more pixels than an inventory icon needs (Gemini
+    starts at 1K). Pillow is optional — without it images are stored as-is.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return data, mime
+    import io
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.width <= width and img.height <= height:
+                return data, mime
+            img.thumbnail((width, height), Image.LANCZOS)
+            out = io.BytesIO()
+            if mime == "image/jpeg":
+                img.convert("RGB").save(out, "JPEG", quality=90)
+            else:
+                img.save(out, "PNG", optimize=True)
+                mime = "image/png"
+            return out.getvalue(), mime
+    except Exception:
+        return data, mime   # unreadable for Pillow → keep what the provider sent
+
+
 def _write_atomic(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".img.", suffix=".tmp")
@@ -170,8 +197,9 @@ class Pipeline:
                 log(f"✗ {key}: {e}" + (" (will retry)" if retry else " (giving up)"))
                 continue
 
-            rel = f"{kind}s/{key.partition(':')[2]}{ext}"
-            _write_atomic(os.path.join(self.store.global_root, rel), result.data)
+            data, mime = postprocess(result.data, result.mime, w, h)
+            rel = f"{kind}s/{key.partition(':')[2]}{MIME_EXT.get(mime, ext)}"
+            _write_atomic(os.path.join(self.store.global_root, rel), data)
             self.store.global_manifest.set_entry(key, {
                 "file": rel, "name": entry.get("name"), "category": entry.get("category"),
                 "source": name, "model": result.meta.get("model"), "prompt": prompt,

@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A und B abgeschlossen (Schritte 1–5), weiter mit Phase C
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9), weiter mit Phase D
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -140,15 +140,23 @@ class ImageProvider(Protocol):
 ```
 
 `image-provider.json` wählt den aktiven Dienst (auch pro Bildart) und legt
-zentrale Stilvorgaben fest. Dienste sind einzelne Dateien unter `providers/`,
-geladen per `importlib`. Umgesetzt werden `dummy` (Tests, ohne API) und
-`gemini` (Gemini 2.5 Flash Image, ~0,04 $/Bild). Freigestellte Icons werden
-nicht benötigt.
+zentrale Stilvorgaben fest. Dienste sind einzelne Dateien unter
+`display/image_providers/` (eigene Dienste: `<data-root>/providers/`).
+Umgesetzt sind `dummy` (Tests, ohne API) und `gemini`. Freigestellte Icons
+werden nicht benötigt.
 
-**Gemini-Key einrichten** (erst ab Schritt 9 nötig): aistudio.google.com →
-API-Key erstellen → Abrechnung im Projekt aktivieren (Budget-Alarm setzen) →
-`setx GEMINI_API_KEY "…"` oder Datei `~/.config/claude-dnd/tts.key`. Derselbe
-Key aktiviert auch die Sprachausgabe.
+**Modellwahl (Stand 2026-09, bei Schritt 9 geprüft):** `gemini-2.5-flash-image`
+ist inzwischen als veraltet markiert. Standard ist `gemini-3.1-flash-lite-image`
+(~0,034 $ pro 1K-Bild, kein Gratis-Kontingent für Bilder) über den
+`interactions`-Endpunkt; `gemini-3.1-flash-image` (~0,045–0,067 $) und der
+klassische `generateContent`-Weg sind per Konfiguration wählbar. Bilder werden
+mit Pillow (falls installiert) auf 512 px verkleinert.
+
+**Gemini-Key einrichten:** aistudio.google.com → API-Key erstellen →
+Abrechnung im Projekt aktivieren (Budget-Alarm setzen) → `setx GEMINI_API_KEY "…"`
+(oder `DND_IMAGE_KEY`, oder Datei `~/.config/claude-dnd/image.key` bzw.
+`tts.key`). Derselbe Key aktiviert auch die Sprachausgabe. Prüfen mit
+`python skills/dnd/scripts/assets.py providers`.
 
 ---
 
