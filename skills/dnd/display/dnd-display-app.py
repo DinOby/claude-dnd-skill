@@ -686,6 +686,14 @@ SCENES: dict[str, dict] = {
 }
 
 # Priority order — checked in sequence; first match wins per chunk
+# Backdrops for journeys (scene_state travel / travel_event), by terrain.
+# "road" has no keywords, so narration never selects it on its own.
+SCENES["road"] = {"keywords": [], "colors": ["#0c0d06", "#1c1a0b"], "accent": "#b89a4a",
+                  "particles": "dust", "label": "The Road"}
+TERRAIN_SCENES = {"road": "road", "plains": "road", "hills": "road", "forest": "forest",
+                  "river": "forest", "mountain": "mountain", "swamp": "swamp", "desert": "desert",
+                  "coast": "ocean", "sea": "ocean", "underground": "cave"}
+
 SCENE_PRIORITY = [
     "mine", "crypt", "arcane", "fire", "temple", "dungeon", "cave",
     "forest", "swamp", "castle", "ocean", "mountain", "desert", "ruins",
@@ -2202,9 +2210,20 @@ def _reconcile_scene(broadcast: bool = True, full: bool = True) -> "list[str]":
                 _broadcast_main({"map": m})
     except (_grid_map.MapError, OSError) as e:
         warnings.append(f"map for the scene not shown: {e}")
+    if broadcast and state["mode"] in ("travel", "travel_event"):
+        _set_travel_backdrop((state.get("travel") or {}).get("terrain"))
     if broadcast:
         _broadcast_main({"scene_state": state})
     return warnings
+
+
+def _set_travel_backdrop(terrain: "Optional[str]") -> None:
+    """Switch the backdrop to the journey's terrain (narration may change it again)."""
+    global _current_scene_name
+    name = TERRAIN_SCENES.get(str(terrain or "").lower(), "road")
+    if name != _current_scene_name and name in SCENES:
+        _current_scene_name = name
+        _broadcast({"scene": SCENES[name] | {"name": name}})
 
 
 def _scene_blocks_map() -> "Optional[str]":

@@ -1,0 +1,64 @@
+/* scene-mode.css — travel and travel-event banners (see static/js/scene-mode.js).
+ *
+ * The banner takes the place of the small scene indicator at the top centre;
+ * with the grid on, the grid moves down to make room.
+ */
+
+#scene-banner {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translate(-50%, -8px);
+  z-index: 5;
+  max-width: min(70vw, 900px);
+  padding: 8px 26px 10px;
+  border-radius: 6px;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+  background: linear-gradient(to bottom, rgba(10, 8, 4, 0.72), rgba(10, 8, 4, 0.5));
+  border: 1px solid rgba(200, 160, 80, 0.28);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+}
+#scene-banner.visible { opacity: 1; transform: translate(-50%, 0); }
+#scene-banner.sb-event { border-color: rgba(214, 90, 60, 0.6); box-shadow: 0 0 28px rgba(200, 70, 40, 0.35); }
+
+#scene-banner .sb-kicker {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: clamp(0.62rem, 1.2vmin, 0.8rem);
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: rgba(214, 176, 96, 0.75);
+}
+#scene-banner.sb-event .sb-kicker { color: rgba(236, 130, 96, 0.9); }
+#scene-banner .sb-title {
+  font-family: 'Cinzel', Georgia, serif;
+  font-size: clamp(1rem, 2.4vmin, 1.6rem);
+  letter-spacing: 0.06em;
+  color: #f4e6c4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#scene-banner .sb-sub {
+  font-family: Georgia, serif;
+  font-size: clamp(0.72rem, 1.4vmin, 0.95rem);
+  color: rgba(244, 230, 196, 0.7);
+}
+
+:root[data-theme="light"] #scene-banner {
+  background: linear-gradient(to bottom, rgba(250, 243, 226, 0.92), rgba(250, 243, 226, 0.78));
+  border-color: rgba(120, 90, 40, 0.35);
+}
+:root[data-theme="light"] #scene-banner .sb-title { color: #3a2a12; }
+:root[data-theme="light"] #scene-banner .sb-sub { color: rgba(58, 42, 18, 0.75); }
+
+body.has-scene-banner #scene-indicator { opacity: 0; }
+body.has-scene-banner { --grid-top: 150px; --grid-h: 54vh; }
+body.has-scene-banner:not(.grid-on) #text-scroll { padding-top: 160px; }
+body.has-scene-banner .grid-title { display: none; }   /* the banner already names the event */
+
+@media (prefers-reduced-motion: reduce) {
+  #scene-banner { transition: opacity 0.3s ease; transform: translate(-50%, 0); }
+}

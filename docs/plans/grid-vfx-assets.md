@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–12b fertig, weiter mit 13
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–14 fertig, weiter mit 15
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -252,6 +252,14 @@ Umgesetzt in Schritt 12 (`display/scene_state.py`, `scripts/travel.py`):
 | `stationary` ohne Karte | Farbverlauf wie bisher |
 | `travel` | Farbverlauf nach Gelände + Reise-Banner, keine Karte |
 | `travel_event` | Raster mit Ereignis-Karte + Ereignis-Banner |
+
+Umgesetzt in Schritt 13/14: Die Karte liegt oben zwischen Seitenleiste und
+Einstellungsspalte, die Erzählung läuft darunter weiter (`body.grid-on`).
+`display_mode` ist die Einstellung „Map View“ (Auto / Scene / Grid, pro
+Browser). Reise-Hintergrund nach Gelände über die bestehenden Szenen
+(`TERRAIN_SCENES`, neue Szene „The Road“ ohne Stichwörter). Banner-Texte der
+Oberfläche sind Englisch, Orts- und Ereignisnamen bleiben wie angegeben.
+Patches mit passender `rev` werden im Browser angewendet, sonst `GET /map`.
 
 ### Karten
 
