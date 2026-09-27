@@ -47,8 +47,12 @@ with no setup required. This is the recommended mode for home and trusted networ
 - A plain HTTP server starts on `:8080` so devices can download `cert.pem`
 - Full per-platform install instructions are printed to the CLI (iOS, Android, Mac)
 
-In LAN mode a token is generated and stored at `.token`. The `send.py` and `push_stats.py`
-scripts read this file automatically.
+An access token is generated on first start and stored at `<data-root>/.runtime/.token`; every
+write request needs it in the `X-DND-Token` header — in local mode as well as in LAN mode. The
+scripts (`send.py`, `push_stats.py`, `travel.py`, `assets.py`, …) read the file automatically and the
+page gets the token from its own `<meta>` tag. Cross-origin requests are only allowed from the
+server's own addresses, and requests for a foreign host name are refused (protection against DNS
+rebinding); extra host names can be allowed with `DND_ALLOWED_HOSTS=name1,name2`.
 
 ### 3. Open the browser tab
 

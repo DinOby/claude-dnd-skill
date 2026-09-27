@@ -26,6 +26,7 @@ import os
 import queue
 import re
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -199,10 +200,15 @@ QUEUE_FILE    = rt(".input_queue")
 DEVICES_FILE         = rt(".approved_devices.json")
 PENDING_DEVICES_FILE = rt(".pending_devices.json")
 
-# ─── LAN / TLS mode ───────────────────────────────────────────────────────────
-# Pass --lan to bind on 0.0.0.0 and protect write endpoints with a token.
+# ─── LAN / TLS mode, access token ─────────────────────────────────────────────
+# Pass --lan to bind on 0.0.0.0 (reachable from phones on the same network).
 # Pass --tls (requires --lan) to enable HTTPS with a self-signed cert.
-# Without --lan the server binds to localhost only; no token is required.
+# Without --lan the server binds to localhost only.
+# In both modes every write endpoint requires the X-DND-Token header: the
+# token lives in the runtime dir (.token), the scripts send it, and the page
+# gets it from its own <meta> tag. Cross-origin pages cannot read that page
+# (CORS allows only the server's own addresses) and cannot reach the server
+# under a foreign host name (Host check against DNS rebinding).
 
 _LAN_MODE: bool = "--lan" in sys.argv
 _TLS_MODE: bool = "--tls" in sys.argv
@@ -213,7 +219,7 @@ if _TLS_MODE:
 
 
 def _get_or_create_token() -> str:
-    """Load or generate the LAN token. Upgrades short legacy tokens to 64-char."""
+    """Load or generate the access token. Upgrades short legacy tokens to 64-char."""
     try:
         token = open(TOKEN_FILE, encoding="utf-8").read().strip()
         if len(token) >= 48:   # 48+ chars = already long enough
@@ -227,7 +233,36 @@ def _get_or_create_token() -> str:
     return token
 
 
-_lan_token: Optional[str] = _get_or_create_token() if _LAN_MODE else None
+try:
+    _lan_token: Optional[str] = _get_or_create_token()
+except OSError as _e:   # unwritable runtime dir: keep a per-process token (scripts cannot send it)
+    print(f"[WARN] could not store the access token ({_e}); write endpoints only work from this page",
+          file=sys.stderr)
+    _lan_token = secrets.token_hex(32)
+
+
+def _local_addresses() -> "set[str]":
+    """Host names and IPs this machine answers to (for the CORS and Host checks)."""
+    names = {"localhost", "127.0.0.1", "::1"}
+    try:
+        hostname = socket.gethostname()
+        names |= {hostname.lower(), f"{hostname.lower()}.local"}
+        names |= set(socket.gethostbyname_ex(hostname)[2])
+    except OSError:
+        pass
+    try:   # the address used for outgoing traffic (the LAN IP phones connect to)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            names.add(s.getsockname()[0])
+    except OSError:
+        pass
+    return names
+
+
+_ALLOWED_HOSTS = _local_addresses() if _LAN_MODE else {"localhost", "127.0.0.1", "::1"}
+_ALLOWED_HOSTS |= {h.strip().lower() for h in os.environ.get("DND_ALLOWED_HOSTS", "").split(",") if h.strip()}
+_OWN_ORIGINS = sorted(f"{scheme}://{f'[{h}]' if ':' in h else h}:5001"
+                      for h in _ALLOWED_HOSTS for scheme in ("http", "https"))
 
 
 # ─── Rate limiting ────────────────────────────────────────────────────────────
@@ -487,17 +522,33 @@ def _check_auto_trigger() -> None:
 
 
 def _token_ok() -> bool:
-    """Return True if the request carries the correct LAN token (or we're in localhost mode)."""
-    if _lan_token is None:
-        return True   # localhost mode — no token required
+    """True if the request carries the access token (required in local and LAN mode)."""
     provided = request.headers.get("X-DND-Token", "")
-    return hmac.compare_digest(provided, _lan_token)
+    return bool(_lan_token) and hmac.compare_digest(provided, _lan_token)
 
 
 app = Flask(__name__)
 
 app.config['TEMPLATES_AUTO_RELOAD'] = True
-CORS(app)
+# Cross-origin access only from the server's own addresses — any other web page
+# open in the same browser gets no CORS permission (it cannot read responses,
+# and requests with the token header are refused at the preflight).
+CORS(app, origins=_OWN_ORIGINS)
+
+
+@app.before_request
+def _check_host():
+    """Refuse requests addressed to a foreign host name (DNS rebinding).
+
+    A page on evil.example that re-points its own name to 127.0.0.1 would be
+    same-origin with the display and could read the token from the page;
+    browsers send that foreign name as Host, so it is rejected here. Extra
+    names (e.g. a custom LAN host name) can be allowed with DND_ALLOWED_HOSTS.
+    """
+    host = (request.host or "").rsplit(":", 1)[0].strip("[]").lower()
+    if host not in _ALLOWED_HOSTS:
+        return "Forbidden host", 403
+    return None
 
 # Wire audio broadcast after _broadcast is defined (see bottom of file)
 # — done lazily via set_broadcast() called after app is created.
@@ -1821,6 +1872,8 @@ def audio_toggle():
     Response: {"ambient": bool, "sfx": bool, "available": bool}
     Broadcasts audio_state to all connected browsers so every device syncs.
     """
+    if not _token_ok():
+        return "Forbidden", 403
     data = request.get_json(silent=True) or {}
     if _audio:
         if "sfx" in data:

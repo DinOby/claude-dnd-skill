@@ -6468,7 +6468,7 @@ document.getElementById('sfx-row').addEventListener('click', () => {
   try {
     fetch('/audio-toggle', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHeaders(),
       body: JSON.stringify({ sfx: _sfxOn }),
     });
   } catch (_) {}

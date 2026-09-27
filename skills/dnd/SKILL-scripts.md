@@ -217,7 +217,7 @@ python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-clear
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --world-time \
   '{"date":"19 Ashveil 1312 AR","day_name":"Moonday","time":"morning","season":"Long Hollow","weather":"calm"}'
 
-# Clear display (use push_stats.py, NOT curl — raw curl lacks the auth token in LAN mode):
+# Clear display (use push_stats.py, NOT curl — raw curl lacks the access token the server requires):
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --clear
 
 # Autorun cycle countdown (shown in party input panel):
