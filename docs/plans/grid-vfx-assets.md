@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A in Arbeit
+Stand: 2026-09-27 · Status: Phase A abgeschlossen (Schritte 1–3), weiter mit Phase B
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
