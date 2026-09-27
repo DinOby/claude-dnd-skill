@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "srd": {
+    "Weapon": "weapon", "Ammunition": "weapon",
+    "Armor": "armor",
+    "Potion": "potion",
+    "Scroll": "scroll",
+    "Ring": "ring",
+    "Wand": "wand", "Staff": "wand", "Rod": "wand",
+    "Wondrous Items": "wondrous",
+    "Tools": "tool",
+    "Adventuring Gear": "gear", "Mounts and Vehicles": "gear"
+  },
+  "keywords": {
+    "weapon":   ["schwert", "klinge", "dolch", "messer", "axt", "beil", "streitkolben", "morgenstern",
+                 "kriegshammer", "streithammer", "speer", "lanze", "hellebarde", "bogen", "langbogen",
+                 "kurzbogen", "armbrust", "schleuder", "kampfstab", "keule", "saebel", "rapier",
+                 "krummsaebel", "sichel", "dreizack", "flegel", "peitsche", "pfeil", "pfeile", "bolzen",
+                 "sword", "longsword", "shortsword", "greatsword", "dagger", "knife", "=axe", "greataxe",
+                 "handaxe", "mace", "warhammer", "spear", "lance", "halberd", "glaive", "=bow", "longbow",
+                 "shortbow", "crossbow", "sling", "quarterstaff", "=club", "scimitar", "rapier", "sickle",
+                 "trident", "flail", "whip", "arrow", "arrows", "bolts"],
+    "armor":    ["ruestung", "panzer", "harnisch", "kettenhemd", "brustplatte", "schild", "helm",
+                 "armschienen", "beinschienen", "plattenpanzer",
+                 "armor", "armour", "=mail", "breastplate", "shield", "helmet", "helm", "bracers"],
+    "potion":   ["trank", "traenke", "elixier", "phiole", "tinktur", "gegengift",
+                 "potion", "elixir", "philter", "=vial", "antitoxin"],
+    "scroll":   ["schriftrolle", "rolle", "pergament", "zauberspruchrolle",
+                 "scroll", "parchment"],
+    "ring":     ["ring", "siegelring", "amulett", "talisman", "halskette", "anhaenger",
+                 "ring", "amulet", "necklace", "pendant", "periapt", "talisman"],
+    "wand":     ["zauberstab", "stab", "rute", "zepter",
+                 "wand", "staff", "=rod", "scepter"],
+    "tool":     ["werkzeug", "diebeswerkzeug", "dietrich", "dietriche", "hammer", "brecheisen",
+                 "schaufel", "spitzhacke", "angel", "laute", "floete", "trommel",
+                 "tools", "=kit", "thieves", "lockpick", "crowbar", "shovel", "pickaxe", "lute", "flute", "drum"],
+    "wondrous": ["umhang", "mantel", "stiefel", "handschuhe", "guertel", "kristallkugel", "kugel",
+                 "edelstein", "juwel", "reliquie", "artefakt", "horn", "spiegel", "kelch",
+                 "cloak", "boots", "gloves", "gauntlets", "=belt", "=orb", "=gem", "jewel", "relic",
+                 "artifact", "mirror", "chalice"]
+  },
+  "queue_categories": ["weapon", "armor", "potion", "scroll", "ring", "wand", "wondrous", "tool"]
+}

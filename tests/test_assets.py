@@ -174,6 +174,116 @@ class StoreTests(unittest.TestCase):
         self.assertFalse([p for p in self.g.iterdir() if p.name.endswith(".tmp")])
 
 
+cat_mod = _load_module(DISPLAY / "item_categories.py", "item_categories_under_test")
+queue_mod = _load_module(DISPLAY / "asset_queue.py", "asset_queue_under_test")
+config_mod = sys.modules.get("config_loader") or _load_module(DISPLAY / "config_loader.py", "config_loader")
+
+
+class CategorizerTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.user_dir = Path(self._tmp.name)
+        cfg = config_mod.ConfigFile("item-categories.json", validator=cat_mod._validate,
+                                    default_dir=str(DISPLAY / "config"), user_dir=str(self.user_dir))
+        self.cat = cat_mod.ItemCategorizer(config=cfg)
+
+    def test_bundled_config_is_valid(self):
+        self.cat._config.get()
+        self.assertEqual(self.cat._config.warnings, [])
+
+    def test_categories(self):
+        cases = {
+            "Flammenschwert der Asche": "weapon", "Schwertscheide": None,
+            "Heiltrank (2)": "potion", "Lederrüstung": "armor", "Kettenhemd": "armor",
+            "Diebeswerkzeug": "tool", "Seil (50 ft)": None, "Schriftrolle der Heilung": "scroll",
+            "Kampfstab": "weapon", "Zauberstab der Blitze": "wand", "Siegelring": "ring",
+            "Bag of Holding": "wondrous", "Longsword": "weapon", "Potion of Healing": "potion",
+            "Chain Mail": "armor", "Umhang des Schutzes": "wondrous",
+        }
+        for name, expected in cases.items():
+            self.assertEqual(self.cat("item", name), expected, name)
+
+    def test_whole_word_keywords_do_not_end_german_words(self):
+        self.assertIsNone(self.cat("item", "Weidenkorb"))    # not "=orb"
+        self.assertIsNone(self.cat("item", "Elbow Pad"))     # not "=bow"
+        self.assertEqual(self.cat("item", "Glowing Orb"), "wondrous")
+
+    def test_srd_wins_over_keywords(self):
+        # "Ring Mail" is SRD armor, although "ring" is a ring keyword.
+        self.assertEqual(self.cat("item", "Ring Mail"), "armor")
+
+    def test_only_items(self):
+        self.assertIsNone(self.cat("token", "Schwertmeister"))
+
+    def test_user_keywords(self):
+        (self.user_dir / "item-categories.json").write_text(json.dumps(
+            {"keywords": {"wondrous": ["seil"]}, "queue_categories": ["wondrous"]}), encoding="utf-8")
+        self.assertEqual(self.cat("item", "Elfenseil"), "wondrous")
+        self.assertEqual(self.cat.queue_categories(), {"wondrous"})
+
+
+class QueueTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = Path(self._tmp.name) / "assets" / "pending-assets.json"
+        self.q = queue_mod.PendingQueue(str(self.path))
+
+    def _item(self, key, name="X"):
+        return {"key": key, "kind": "item", "name": name, "category": "weapon", "campaign": "ashveil"}
+
+    def test_add_dedupes_and_persists(self):
+        self.assertEqual(self.q.add_many([self._item("item:a"), self._item("item:a"), self._item("item:b")]),
+                         ["item:a", "item:b"])
+        self.assertEqual(self.q.add_many([self._item("item:a")]), [])
+        entries = queue_mod.PendingQueue(str(self.path)).entries()
+        self.assertEqual([e["key"] for e in entries], ["item:a", "item:b"])
+        e = entries[0]
+        self.assertEqual((e["status"], e["attempts"], e["campaign"], e["prompt"]), ("pending", 0, "ashveil", None))
+        self.assertFalse(self.path.with_name("pending-assets.json.lock").exists())
+
+    def test_skipped_stays_skipped(self):
+        self.q.add_many([self._item("item:a")])
+        self.assertTrue(self.q.update("item:a", status="skipped"))
+        fresh = queue_mod.PendingQueue(str(self.path))
+        self.assertEqual(fresh.add_many([self._item("item:a")]), [])
+        self.assertEqual(fresh.entries("skipped")[0]["key"], "item:a")
+
+    def test_update(self):
+        self.q.add_many([self._item("item:a")])
+        self.assertTrue(self.q.update("item:a", prompt="glowing blade", attempts=1))
+        self.assertEqual(self.q.entries()[0]["prompt"], "glowing blade")
+        self.assertFalse(self.q.update("item:zzz", status="done"))
+        with self.assertRaises(ValueError):
+            self.q.update("item:a", status="later")
+
+    def test_broken_file_starts_fresh(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("{ kaputt", encoding="utf-8")
+        self.assertEqual(self.q.entries(), [])
+        self.assertEqual(self.q.add_many([self._item("item:a")]), ["item:a"])
+
+    def test_stale_lock_is_broken(self):
+        self.path.parent.mkdir(parents=True)
+        lock = self.path.with_name("pending-assets.json.lock")
+        lock.write_text("123", encoding="utf-8")
+        old = __import__("time").time() - 120
+        os.utime(lock, (old, old))
+        self.assertEqual(self.q.add_many([self._item("item:a")]), ["item:a"])
+
+    def test_concurrent_writers_lose_nothing(self):
+        import threading
+        queues = [queue_mod.PendingQueue(str(self.path)) for _ in range(4)]
+        def work(i):
+            for j in range(10):
+                queues[i].add_many([self._item(f"item:{i}-{j}")])
+        threads = [threading.Thread(target=work, args=(i,)) for i in range(4)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        self.assertEqual(len(self.q.entries()), 40)
+
+
 def _import_app():
     spec = importlib.util.spec_from_file_location("_assets_app_under_test", str(DISPLAY / "dnd-display-app.py"))
     mod = importlib.util.module_from_spec(spec)
@@ -197,7 +307,8 @@ class RouteTests(unittest.TestCase):
         (root / "manifest.json").write_text(json.dumps({"entries": {
             "item:dolch": {"file": "items/dolch.png", "category": "weapon"}}}), encoding="utf-8")
         self._orig = self.app._assets
-        self.app._assets = store_mod.AssetStore(global_root=str(root))
+        self.app._assets = store_mod.AssetStore(global_root=str(root),
+                                                categorize=self.app._item_categories)
         # Cleanups run LIFO after tearDown: responses (registered later) close
         # first, so Windows can delete the files they were serving.
         self.addCleanup(self._tmp.cleanup)
@@ -234,6 +345,28 @@ class RouteTests(unittest.TestCase):
         bc.assert_called_once_with({"assets_changed": True})
         with mock.patch.object(self.app, "_token_ok", lambda: False):
             self.assertEqual(self.client.post("/assets/changed").status_code, 403)
+
+    def test_stats_queue_items_without_image(self):
+        q = queue_mod.PendingQueue(os.path.join(self._tmp.name, "pending-assets.json"))
+        with mock.patch.object(self.app, "_asset_queue", q),              mock.patch.object(self.app, "_persist_stats"),              mock.patch.object(self.app, "_broadcast"),              mock.patch.object(self.app, "_current_stats", {"players": []}):
+            self.client.post("/stats", json={"players": [{"name": "Flerb", "sheet": {"inventory": [
+                "Dolch",                      # has an image
+                "Flammenschwert der Asche",   # weapon → queued
+                "Heiltrank (2)", "Heiltrank", # same key once
+                "Seil (50 ft)",               # gear → not queued by default
+            ]}}]})
+        entries = q.entries()
+        self.assertEqual([(e["key"], e["category"], e["name"]) for e in entries], [
+            ("item:flammenschwert-der-asche", "weapon", "Flammenschwert der Asche"),
+            ("item:heiltrank", "potion", "Heiltrank"),
+        ])
+
+    def test_queue_failure_never_breaks_stats(self):
+        broken = mock.Mock()
+        broken.add_many.side_effect = OSError("disk full")
+        with mock.patch.object(self.app, "_asset_queue", broken),              mock.patch.object(self.app, "_persist_stats"),              mock.patch.object(self.app, "_broadcast"),              mock.patch.object(self.app, "_current_stats", {"players": []}),              redirect_stderr(io.StringIO()):
+            resp = self.client.post("/stats", json={"players": [{"name": "F", "sheet": {"inventory": ["Langschwert"]}}]})
+        self.assertEqual(resp.status_code, 204)
 
     def test_inventory_hook_in_index(self):
         html = (DISPLAY / "templates" / "index.html").read_text(encoding="utf-8")

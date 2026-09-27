@@ -81,9 +81,14 @@ try:
 except Exception:
     _vfx = None   # type: ignore
 
-# Content images (items, tokens, maps) with category placeholders
+# Content images (items, tokens, maps) with category placeholders, plus the
+# wait-list of content that still needs an image (never generated during play)
 import asset_store as _asset_store
-_assets = _asset_store.AssetStore()
+from asset_queue import PendingQueue as _PendingQueue
+from item_categories import ItemCategorizer as _ItemCategorizer
+_item_categories = _ItemCategorizer()
+_assets = _asset_store.AssetStore(categorize=_item_categories)
+_asset_queue = _PendingQueue(os.path.join(_assets.global_root, "pending-assets.json"))
 
 
 def _campaign_flag_list(flag: str) -> "Optional[list[str]]":
@@ -1699,6 +1704,7 @@ def stats():
 
     _persist_stats()
     _broadcast({"stats": current})
+    _queue_missing_assets(current)
     # Broadcast any round-based effect expiries after the stats update
     for evt in _effect_expire_events:
         _broadcast({"effect_expired": evt})
@@ -2025,6 +2031,38 @@ def vfx_icon(name):
 
 
 _ASSET_RESOLVE_MAX = 100
+
+
+def _queue_missing_assets(stats: dict) -> None:
+    """Put inventory items that have no image on the wait-list.
+
+    Only categories listed in item-categories.json "queue_categories" are
+    queued (mundane gear is not, by default). Never raises: the wait-list is
+    a convenience and must not break a stats update.
+    """
+    try:
+        wanted = _item_categories.queue_categories()
+        try:
+            camp = open(CAMP_FILE, encoding="utf-8").read().strip() or None
+        except OSError:
+            camp = None
+        items, seen = [], set()
+        for player in stats.get("players") or []:
+            for name in ((player.get("sheet") or {}).get("inventory") or []):
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                info = _assets.resolve("item", name)
+                if info["url"] or not info["key"] or info["key"] in seen:
+                    continue
+                seen.add(info["key"])
+                if info["category"] in wanted:
+                    items.append({"key": info["key"], "kind": "item",
+                                  "name": _asset_store.base_name("item", name),
+                                  "category": info["category"], "campaign": camp})
+        if items:
+            _asset_queue.add_many(items)
+    except Exception as e:
+        print(f"asset queue: {e}", file=sys.stderr)
 
 
 @app.route("/assets/resolve")
