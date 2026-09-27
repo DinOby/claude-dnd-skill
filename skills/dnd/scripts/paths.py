@@ -114,6 +114,14 @@ def user_config_dir() -> pathlib.Path:
     return _root() / "config"
 
 
+def user_assets_dir() -> pathlib.Path:
+    """User images for the display (tokens, items, maps, overlay icons).
+
+    Update-safe, like user_config_dir(). Not created on read.
+    """
+    return _root() / "assets"
+
+
 def campaigns_dir() -> pathlib.Path:
     """Return the campaigns directory under the configured root."""
     return _root() / "campaigns"

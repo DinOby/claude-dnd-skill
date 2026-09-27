@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "cooldown_ms": 2500,
+  "max_per_chunk": 1,
+  "triggers": {
+    "de": {
+      "steal":  ["stiehlt", "klaut", "klaute", "entwendet", "entwendete", "mopst", "Taschendieb*",
+                 "lässt mitgehen", "ließ mitgehen"],
+      "sneak":  ["schleicht", "schlich", "pirscht", "pirschte", "versteckt sich", "verbirgt sich",
+                 "duckt sich in die Schatten"],
+      "heal":   ["heilt", "heilte", "Heiltrank", "Heilung", "heilend*", "Wunden schließen sich"],
+      "spell":  ["zaubert", "zauberte", "beschwört", "beschwor", "Zauberspruch", "Zauberformel",
+                 "wirkt einen Zauber", "spricht einen Zauber", "Feuerball", "Magiegeschoss", "Blitzstrahl"],
+      "ranged": ["schießt", "schoss", "Pfeil", "Pfeile", "Bolzen", "Armbrust", "spannt den Bogen",
+                 "legt einen Pfeil an"],
+      "defend": ["pariert", "parierte", "blockt", "blockte", "wehrt ab", "wehrte ab", "weicht aus", "wich aus"],
+      "attack": ["greift an", "griff an", "greif* an", "schlägt zu", "schlug zu", "sticht zu", "stach zu",
+                 "Hieb", "holt aus", "attackiert", "attackierte", "stürmt auf"],
+      "loot":   ["Schatztruhe", "Goldmünzen", "Beute", "plündert", "plünderte"]
+    },
+    "en": {
+      "steal":  ["steals", "stole", "pickpocket*", "pilfers", "swipes", "lifts the purse"],
+      "sneak":  ["sneaks", "snuck", "creeps", "hides in the shadows", "slinks"],
+      "heal":   ["heals", "healed", "healing potion", "wounds close"],
+      "spell":  ["casts", "cast a spell", "conjures", "fireball", "magic missile", "incantation"],
+      "ranged": ["shoots", "arrow", "arrows", "crossbow", "looses +", "nocks an arrow"],
+      "defend": ["parries", "parried", "blocks", "blocked", "dodges", "dodged"],
+      "attack": ["attacks", "attacked", "strikes", "struck", "slashes", "stabs", "swings at", "lunges"],
+      "loot":   ["treasure chest", "gold coins", "loot", "plunders"]
+    }
+  }
+}

@@ -671,4 +671,10 @@ def _load_languages_from_env() -> None:
         set_sfx_languages(valid)
 
 
+def reset_languages() -> None:
+    """Back to the default: DND_SFX_LANGUAGES if set, else English only."""
+    set_sfx_languages(["en"])
+    _load_languages_from_env()
+
+
 _load_languages_from_env()

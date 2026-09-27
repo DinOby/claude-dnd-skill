@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "id": "default",
+  "fallback": "attack",
+  "effects": {
+    "attack": {"icon": "attack.png",       "animation": "slash", "duration_ms": 1100, "tint": "#e05a4a", "label": "Attack"},
+    "ranged": {"icon": "class_ranger.png", "animation": "shoot", "duration_ms": 1000, "tint": "#c9a13b", "label": "Ranged attack"},
+    "spell":  {"icon": "spellbook.png",    "animation": "pulse", "duration_ms": 1400, "tint": "#8f6ae0", "label": "Spell"},
+    "heal":   {"icon": "heal.png",         "animation": "rise",  "duration_ms": 1400, "tint": "#5ec27a", "label": "Healing"},
+    "steal":  {"icon": "dagger.png",       "animation": "swipe", "duration_ms": 1000, "tint": "#b0b8c4", "label": "Theft"},
+    "sneak":  {"icon": "class_rogue.png",  "animation": "fade",  "duration_ms": 1600, "tint": "#6d7a8c", "label": "Stealth"},
+    "defend": {"icon": "shield.png",       "animation": "pop",   "duration_ms": 900,  "tint": "#7fa7d9", "label": "Defense"},
+    "loot":   {"icon": "treasure.png",     "animation": "rise",  "duration_ms": 1300, "tint": "#e8c05a", "label": "Loot"}
+  }
+}

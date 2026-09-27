@@ -368,6 +368,7 @@ DNDEND
 | `--stat-inventory-remove` | `"NAME:ITEM"` | Item spent or given away |
 | `--effect-start` | `"NAME:SPELL:DURATION"` | Start timed effect — DURATION: `10r` / `60m` / `8h` / `indef`; append `:conc` if concentration |
 | `--effect-end` | `"NAME:SPELL"` | End effect (broken concentration, dispelled, player drops it) |
+| `--vfx` | `"EFFECT[:NAME]"` | Optional action overlay on the display: `attack` `ranged` `spell` `heal` `steal` `sneak` `defend` `loot`. Use for the turn's key action (one per send); narration keywords also fire overlays automatically, so skip it when the text already names the action plainly |
 
 **Batching rule — ONE Bash tool call per response, multiple typed sends inside it:**
 

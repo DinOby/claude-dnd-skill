@@ -53,6 +53,14 @@ Usage:
     # Timed effect flags:
     #   --effect-start "NAME:SPELL:DURATION"   DURATION: 10r/60m/8h/indef  optional :conc
     #   --effect-end   "NAME:SPELL"            narrative end (broken/dispelled)
+
+    # Action overlay — fire a short icon animation explicitly (repeatable).
+    # Effects are defined in display/config/vfx-iconset.json (attack, ranged,
+    # spell, heal, steal, sneak, defend, loot). Keyword spotting fires them
+    # automatically too; the explicit flag wins and restarts the cooldown.
+    python3 send.py --vfx attack:Flerb << 'DNDEND'
+    Flerb's axe bites deep into the ogre's shoulder.
+    DNDEND
 """
 
 import sys
@@ -81,6 +89,7 @@ FLASK_URL   = f"{BASE_URL}/chunk"
 STATS_URL   = f"{BASE_URL}/stats"
 HEALTH_URL  = f"{BASE_URL}/health"
 DICE_REQ_URL = f"{BASE_URL}/dice-request"
+VFX_URL     = f"{BASE_URL}/vfx"
 TOKEN_FILE  = rt(".token")
 TIMEOUT     = 8.0
 RETRIES     = 1                # one retry on timeout/connection error
@@ -464,6 +473,11 @@ def main() -> None:
     parser.add_argument("--effect-end", action="append", metavar="NAME:SPELL",
         help="End a timed effect: NAME:SPELL (narrative end — broken, dispelled, player drops)")
 
+    # ── Action overlay ────────────────────────────────────────────────────────
+    parser.add_argument("--vfx", action="append", metavar="EFFECT[:ACTOR]",
+        help="Show an action overlay, e.g. attack or spell:Mira (can repeat). "
+             "Sent before the narration so it plays as the text starts.")
+
     # ── Diagnostics ───────────────────────────────────────────────────────────
     parser.add_argument("--verify", action="store_true",
         help="After sending, GET /health and confirm the broadcast was received. "
@@ -637,6 +651,19 @@ def main() -> None:
         print(f"send.py: ABORT — {flag} requires a text body but stdin was empty.",
               file=sys.stderr)
         sys.exit(2)
+
+    # ── Action overlays (before the text, so they play as it starts) ──────────
+    # Cosmetic: a failed overlay only warns. It must never turn the send into a
+    # PARTIAL FAILURE, or the caller might re-send — and duplicate — narration.
+    for spec in args.vfx or []:
+        spec = spec.strip()
+        if not spec:
+            continue
+        if not _post(VFX_URL, json.dumps({"spec": spec}).encode("utf-8"), token):
+            entry = _SEND_LOG.pop()
+            if entry.get("reason") != "display offline":
+                print(f"send.py: overlay '{spec}' skipped ({entry.get('reason', '?')})",
+                      file=sys.stderr)
 
     # ── Text send ─────────────────────────────────────────────────────────────
     chunks_sent = 0

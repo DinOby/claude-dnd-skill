@@ -75,36 +75,56 @@ try:
 except Exception:
     _tts = None   # type: ignore
 
+# Action overlays — config-driven keyword → effect broadcast
+try:
+    import vfx as _vfx
+except Exception:
+    _vfx = None   # type: ignore
 
-def _apply_campaign_sfx_languages() -> None:
-    """Read sfx_languages from the active campaign's state.md Session Flags.
 
-    state.md line shape:  `sfx_languages: en,zh,es`
-    Takes precedence over the DND_SFX_LANGUAGES env var when present; both
-    fall back to English-only if neither is set.
+def _campaign_flag_list(flag: str) -> "Optional[list[str]]":
+    """Comma list from a Session Flag in the active campaign's state.md.
+
+    Line shape:  `sfx_languages: en,zh,es`. None when there is no active
+    campaign, no state.md, or no such line.
     """
-    if _audio is None:
-        return
     try:
         camp = open(rt(".campaign"), encoding="utf-8").read().strip()
         if not camp:
-            return
+            return None
         state_md = _find_campaign(camp) / "state.md"
         if not state_md.exists():
-            return
+            return None
         text = state_md.read_text(encoding="utf-8", errors="replace")
     except (OSError, ValueError):
-        return
-    m = re.search(r"^\s*sfx_languages:\s*([\w,\s\-]+)$", text, re.MULTILINE)
+        return None
+    # [ \t] rather than \s so the match can never run onto the next line.
+    m = re.search(rf"^[ \t]*{re.escape(flag)}:[ \t]*([\w,\- \t]*?)[ \t]*$", text, re.MULTILINE)
     if not m:
-        return
-    langs = [l.strip() for l in m.group(1).split(",") if l.strip()]
-    valid = [l for l in langs if l in _audio.available_languages()]
-    if valid:
-        _audio.set_sfx_languages(valid)
+        return None
+    return [l.strip() for l in m.group(1).split(",") if l.strip()]
 
 
-_apply_campaign_sfx_languages()
+def _apply_campaign_languages() -> None:
+    """Apply the active campaign's trigger languages to SFX and overlays.
+
+    sfx_languages takes precedence over the DND_SFX_LANGUAGES env var; without
+    it SFX fall back to that env var, then English. vfx_languages picks the
+    overlay packs; without it every language in vfx-triggers.json is active.
+    Runs on startup and whenever the active campaign changes.
+    """
+    if _audio is not None:
+        langs = _campaign_flag_list("sfx_languages")
+        valid = [l for l in (langs or []) if l in _audio.available_languages()]
+        if valid:
+            _audio.set_sfx_languages(valid)
+        else:
+            _audio.reset_languages()
+    if _vfx is not None:
+        _vfx.set_languages(_campaign_flag_list("vfx_languages"))
+
+
+_apply_campaign_languages()
 
 HELP_LOCK     = rt(".help-lock")
 CAMP_FILE     = rt(".campaign")
@@ -1360,6 +1380,8 @@ def chunk():
         # SFX scan on all non-player text
         if _audio:
             _audio.on_text(cleaned)
+        if _vfx:
+            _vfx.on_text(cleaned)
 
     # Store full typed payload so replay preserves action/player/npc/dice/tutor context
     log_entry: dict = {"text": cleaned}
@@ -1631,6 +1653,7 @@ def stats():
             _load_tail()
         except Exception:
             pass
+        _apply_campaign_languages()
         # Resolve and stash the ruleset for this campaign so the sidebar badge
         # can render. Defaults to '2014' for legacy campaigns predating the
         # ruleset field. Wrapped in try/except so a missing paths import or
@@ -1940,6 +1963,43 @@ def audio_sfx(name):
         return "Not found", 404
     return Response(wav, mimetype="audio/wav",
                     headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.route("/vfx", methods=["POST"])
+def vfx_trigger():
+    """Fire an action overlay explicitly (send.py --vfx attack:Flerb).
+
+    Body: {"spec": "attack:Flerb"}  or  {"effect": "attack", "actor": "Flerb"}
+    """
+    if not _token_ok():
+        return "Forbidden", 403
+    if not _vfx:
+        return "VFX not available", 503
+    data = request.get_json(silent=True) or {}
+    if "spec" in data:
+        effect, actor = _vfx.parse_spec(str(data["spec"]))
+    else:
+        effect, actor = str(data.get("effect") or ""), data.get("actor")
+    if not effect or _vfx.trigger(effect, str(actor) if actor else None) is None:
+        return jsonify({"error": "invalid effect name"}), 400
+    return "", 204
+
+
+@app.route("/vfx/iconset")
+def vfx_iconset():
+    """Merged overlay iconset (bundled default + user override)."""
+    if not _vfx:
+        return jsonify({"effects": {}}), 200
+    return jsonify(_vfx.get_iconset()), 200
+
+
+@app.route("/vfx/icons/<name>")
+def vfx_icon(name):
+    """Overlay icon: <data-root>/assets/vfx/ first, then the bundled icons/."""
+    found = _vfx.icon_path(name) if _vfx else None
+    if not found:
+        return "Not found", 404
+    return send_from_directory(found[0], found[1], max_age=3600)
 
 
 @app.route("/clear", methods=["POST"])
@@ -2662,6 +2722,8 @@ if __name__ == "__main__":
     # Wire audio SFX broadcast now that _broadcast is defined
     if _audio:
         _audio.set_broadcast(_broadcast)
+    if _vfx:
+        _vfx.set_broadcast(_broadcast)
 
     host = "0.0.0.0" if _LAN_MODE else "localhost"
     # TLS — only enabled when --tls is explicitly passed; HTTP is the default.
