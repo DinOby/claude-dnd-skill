@@ -229,8 +229,9 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 
    6. Re-run scene-context (now populated). Then proceed to step 6 (recap).
 
-8. Deliver one in-character paragraph recapping current situation — where the party is, what's at stake, what was last happening.
-9. Enter active DM mode — no `/dm:dnd` prefix needed from this point.
+8. **Where is the party?** Run `python3 ${CLAUDE_SKILL_DIR}/scripts/travel.py -c <campaign-name> status`. It is authoritative for stationary / on the road (day x of y) / in a travel event; if it disagrees with `state.md`, trust the scene state and correct `state.md` at the next save. With the display running, `--set-campaign` (step 4) already restored the battle map, the travel banner or the event map — do not re-send them. A campaign that predates scene state reports "At (no place set)": set it with `push_stats.py --scene-set "<current location>"` (plus a map if the scene needs one, see SKILL.md → *Scene, journeys and the battle map*).
+9. Deliver one in-character paragraph recapping current situation — where the party is, what's at stake, what was last happening.
+10. Enter active DM mode — no `/dm:dnd` prefix needed from this point.
 
 ---
 
@@ -446,7 +447,8 @@ If `graph.json` doesn't exist yet for this campaign, skip the sweep entirely (no
         - **Did not land — pressure absorbed without consequence** → the beat is overdue and its current shape no longer fits. **Run `/dm:dnd arc revise` immediately**; do not just update `steering_notes`. The beat's `what_changes` was event-shaped (something specific happens) when it should be consequence-shaped (something fundamentally different is true) — revise both `what_changes` and `world_pressure` to fit a path that DOES land. The committed shape bends; it does not break.
         - **Pressure not yet delivered** → leave beat alone; expected to deliver next session.
       iv. Update `steering_notes` for the next outstanding beat with the *consequence shape* expected, not the specific event.
-   f. **Tail verification (added 2026-05-01):** before killing the display, verify the campaign-side `session_tail.json` is healthy:
+   f. **Images:** run `python3 ${CLAUDE_SKILL_DIR}/scripts/assets.py status`. If entries are pending (new NPCs, the player characters' portraits, map objects), mention it in one line and offer `/dm:dnd assets generate` — never generate without the user's go-ahead (it costs money).
+   g. **Tail verification (added 2026-05-01):** before killing the display, verify the campaign-side `session_tail.json` is healthy:
       ```bash
       bash ${CLAUDE_SKILL_DIR}/display/verify_tail.sh <campaign-name>
       ```
@@ -717,9 +719,10 @@ Run `scripts/dice.py <notation>`. Display output verbatim. Examples: `d20`, `2d6
    ```bash
    python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --turn-order '{"order":[...],"current":"FirstName","round":1}'
    ```
+   **Battle map** (display running): if a map is on screen (the scene's or a travel event's), use it — add every combatant not yet on it with the **same name as in the turn order** (`--token-add "Goblin 1:enemy"`, `'{"name":"Oger","kind":"enemy","size":2}'` for large creatures; no position = their spawn zone), in the same call as `--turn-order`. If there is no map, create one only when positions will matter (ranged attackers, cover, several enemies, terrain): `--map-new <closest template> --map-id <place-slug> --token-party` plus the enemies. A quick one-on-one brawl needs no map. On the road with no event running, start one first (`travel.py event --title "…" --template <template>`) — plain travel shows no map.
 5. Save STATE_JSON to `state.md` under `## Active Combat`.
 6. Step through turns using the per-turn sequence (in SKILL.md Active DM Mode).
-7. On combat end: update HP in character sheets, clear `## Active Combat`, `push_stats.py --turn-clear`, narrate aftermath, send XP summary, run `tracker.py -c <campaign> clear`.
+7. On combat end: update HP in character sheets, clear `## Active Combat`, `push_stats.py --turn-clear` (with `--token-remove` for the fallen and fled, same call — the map stays for the aftermath), narrate aftermath, send XP summary, run `tracker.py -c <campaign> clear`. A fight that was a travel event ends with `travel.py event-end` once the scene is over.
 
 **XP awards** go in the final display send:
 ```bash
@@ -743,7 +746,7 @@ DNDEND
 3. Advance time: `calendar.py -c <campaign> rest short`
 4. Clear encounter conditions: `tracker.py -c <campaign> clear` (concentration may persist — ask)
 
-**Long (8 hours):**
+**Long (8 hours):** (on a journey the night is part of `travel.py day` — do the recovery steps but skip step 3)
 1. Restore all HP, half max Hit Dice (round up), all spell slots, most class features. Update sheet.
 2. Push: `push_stats.py --player NAME --hp <max> <max>` and `--second-wind true`.
 3. Advance time: `calendar.py -c <campaign> rest long`

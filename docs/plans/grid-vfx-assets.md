@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–15 fertig, weiter mit 16
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–16 fertig (Testsitzung mit echten Spielern offen), optional 17
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -370,4 +370,11 @@ Jeder Schritt ein eigener PR mit Tests.
     - Warteliste: Figuren und unbekannte Terrain-Typen ohne Bild; Spielercharaktere mit Volk/Klasse als Hinweis.
     - Markierung der Figur am Zug (`turn_order.current`).
 16. `SKILL.md`/`SKILL-commands.md`: wann `--scene-set`, `travel.py start|day|arrive`, `event-end`; `combat start` legt nur bei Bedarf eine Karte an. Testsitzung.
+    Umgesetzt: Abschnitt *Scene, journeys and the battle map* in `SKILL.md` (Karte nur, wenn
+    Positionen zählen; Reisetag enthält die Nacht, kein doppeltes Vorstellen der Uhr; Figuren
+    heißen wie in der Initiative), Kampfabfolge mit `--stat-move`; `/dm:dnd load` liest
+    `travel.py status`, `combat start` nutzt eine vorhandene Karte oder legt nur bei Bedarf eine an,
+    `/dm:dnd end` bietet die Bilderzeugung an. Ereignis-Gegner werden nummeriert (`Wolf 1` …),
+    die Zug-Markierung erkennt auch die id. Befehlsfolge als Skript-Testlauf gegen das Display
+    geprüft; eine Sitzung mit echten Spielern steht noch aus.
 17. *(Optional)* Einblendungen über der Figur der handelnden Person.

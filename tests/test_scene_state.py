@@ -137,7 +137,7 @@ class TravelScriptTests(unittest.TestCase):
         cfg = {"terrains": {"forest": {"wolf": {"title": "Wölfe", "template": "forest-clearing",
                                                 "tokens": [{"name": "Wolf", "count": 3}]}}}}
         ev = self.travel.draw_event("forest", cfg, random.Random(1))
-        self.assertEqual([t["name"] for t in ev["tokens"]], ["Wolf"] * 3)
+        self.assertEqual([t["name"] for t in ev["tokens"]], ["Wolf 1", "Wolf 2", "Wolf 3"])
         self.assertEqual(ev["tokens"][0]["kind"], "enemy")
         empty = self.travel.draw_event("desert", {"terrains": {}}, random.Random(1))
         self.assertIn("Mythic focus", empty["hint"])

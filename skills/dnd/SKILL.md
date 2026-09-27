@@ -412,10 +412,23 @@ e. Write full narration for this turn
 f. send.py [--stat-*] ← send complete narration + ALL stat changes — NEVER skip
    Use --effect-start / --effect-end flags when effects begin or end this turn (syncs display)
 g. push_stats.py --turn-current  ← advance turn pointer (still separate — not a narration)
+   + --stat-move "NAME:POS" for every token that moved this turn (same call, when a map is on screen)
 ```
 Step (f) is the most commonly missed. Every narration block must be sent.
 Step (g) uses `push_stats.py --turn-current` directly because it has no narration to bundle with.
 `tracker.py effect tick` is the headless fallback — it fires regardless of whether the display is running.
+
+**Scene, journeys and the battle map:**
+
+Where the party is lives in the scene state (`travel.py status`): `stationary` at a place, `travel` on the road, `travel_event` when something happens on the road. It persists in the campaign and works without the display; with the display running, the main screen follows it (map at a place, banner and terrain backdrop on the road, event map during an event — never on phones). Keep it true to the fiction — it is continuity, like the clock. Script syntax: `SKILL-scripts.md → Stats Display Script (Battle map, Scene)` and `→ Travel`.
+
+- **New place without a journey** (walking into the tavern, down into the cellar, across town): `push_stats.py --scene-set "Place"`. This clears the previous map.
+- **Give a place a map** when positions matter: NPCs present the party may deal with, a likely confrontation, a room to search or sneak through, or any fight. Skip it for pure exposition, montage and quick transitions. In the same call as `--scene-set`: `--map-new TEMPLATE --map-id <place-slug> --map-name "<Place>" --token-party`, then the NPCs present (`--token-add '{"name":"Wirtin Hilde","archetype":"Wirtin"}'`). Pick the closest template (`tavern-small market-square forest-road forest-clearing mountain-pass bridge camp cave-mouth dungeon-corridor ruins`); give recurring places a stable id — the same id later reuses the stored layout and its tokens (`--map-show <id>`).
+- **Journeys** between settlements or anything longer than a few hours: `travel.py start --to X --days N --terrain T [--via Route]`. Then `travel.py day` once per in-fiction travel day — it advances the calendar (do not also run `calendar.py advance`) and rolls the event check. A quiet day: summarise it in a line or two and move on (fast-forward travel). After the last day: `travel.py arrive`, then map the destination if the scene needs it. Short hops inside a town are `--scene-set`, not journeys.
+- **Travel event** (printed by `day`, or forced with `travel.py event` when the story calls for it): the event map appears with the party and the creatures. Use the printed hint and Mythic focus as a starting point, not a script — an event can be talked through, avoided or fought. When it is resolved: `travel.py event-end` (the event map is discarded), then continue with `day`.
+- **A travel day includes the night's camp.** Apply long-rest recovery as usual but skip the calendar step of `/dm:dnd rest long` — `travel.py day` already advanced the clock.
+- **Tokens follow the narration.** When the narration moves someone meaningfully, bundle `--stat-move "NAME:POS"` into that turn's `push_stats.py` call; add arrivals with `--token-add`, remove the dead, fled or departed with `--token-remove`. Positions are column letter + row (`D5`, `A1` = top-left). Use the **same names as the initiative order** (`Goblin 1`, `Goblin 2`) so the turn marker and moves match. A refused move prints why (off the grid, unknown name) — fix and resend, don't narrate around it. Mention squares in the narration only when it helps the players decide (ranges, cover, who is adjacent).
+- **Tokens without a picture** show initials and go on the image wait-list automatically; generate them between sessions (`/dm:dnd assets`).
 
 ---
 

@@ -77,6 +77,7 @@ console.log(JSON.stringify({
   },
   banners: [S._bannerFor(travel), S._bannerFor(event), S._bannerFor(stationary), S._bannerFor(null),
             S._bannerFor({ mode: 'travel', travel: { to: 'X', day: 0, days_total: 3 } })],
+  turnIds: [G._turnId('Goblin 2'), G._turnId('Wirtin Hilde'), G._turnId('Ölaf'), G._turnId('')],
   sprite: [G._spriteMode('table'), G._spriteMode('Chair'), G._spriteMode('tree'), G._spriteMode('wall'), G._spriteMode('whatever')],
   spriteBg: [G._spriteBackground('/s/table.png', 'table'), G._spriteBackground('/s/a"b.png', 'tree')],
   merged: G._mergeImages({ floor: '/f', terrain: { a: 1 }, tokens: { x: 1 } }, { tokens: { y: 2 } }),
@@ -129,6 +130,7 @@ class GridScriptTests(unittest.TestCase):
         self.assertEqual((after["floor"], after["terrain"], after["tokens"]),
                          ("/f.png", {"table": "/t.png"}, {"flerb": "/p.png", "g2": "/g.png"}))
         self.assertEqual(self.out["turnAfter"], "flerb")
+        self.assertEqual(self.out["turnIds"], ["goblin-2", "wirtin-hilde", "oelaf", ""])
         self.assertEqual(self.out["imagesAfterClear"], {"floor": None, "terrain": {}, "tokens": {}})
 
     def test_display_rule(self):

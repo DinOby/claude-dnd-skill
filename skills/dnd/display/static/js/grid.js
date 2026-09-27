@@ -82,6 +82,12 @@
     return next;
   }
 
+  /* "Goblin 2" → "goblin-2": the id grid_map.py derives from a name (umlauts as ae/oe/ue/ss). */
+  function turnId(name) {
+    return String(name || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+      .replace(/ß/g, 'ss').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
   function spriteMode(type) {
     return STRETCH.includes(String(type).toLowerCase()) ? 'stretch' : 'tile';
   }
@@ -223,7 +229,7 @@
         field.appendChild(tEl);
       }
       const portrait = images.tokens[tok.id];
-      const isTurn = !!turn && String(tok.name).toLowerCase() === turn;
+      const isTurn = !!turn && (String(tok.name).toLowerCase() === turn || tok.id === turnId(turn));
       tEl.className = 'grid-token grid-kind-' + (tok.kind || 'npc') + (tEl.classList.contains('entering') ? ' entering' : '')
         + (portrait ? ' has-img' : '') + (isTurn ? ' grid-token-turn' : '');
       tEl.dataset.id = tok.id;
@@ -329,6 +335,7 @@
     _colLabel: colLabel,
     _cellSize: cellSize,
     _spriteMode: spriteMode,
+    _turnId: turnId,
     _spriteBackground: spriteBackground,
     _mergeImages: mergeImages,
     _images: () => images,

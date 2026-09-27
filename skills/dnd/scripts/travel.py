@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import random
+import re
 import ssl
 import subprocess
 import sys
@@ -90,12 +91,17 @@ def event_table() -> ConfigFile:
 
 
 def expand_tokens(tokens: list) -> "list[dict]":
-    """[{"name": "Wolf", "count": 3}] → three Wolf tokens (the map numbers them)."""
+    """[{"name": "Wolf", "count": 3}] → Wolf 1, Wolf 2, Wolf 3.
+
+    Numbered like initiative entries, so the turn order, --stat-move and the
+    map all use the same names; portraits still resolve via "Wolf".
+    """
     out = []
     for tok in tokens or []:
         base = {k: v for k, v in tok.items() if k != "count"}
         base.setdefault("kind", "enemy")
-        out += [dict(base) for _ in range(int(tok.get("count", 1)))]
+        n = int(tok.get("count", 1))
+        out += [dict(base, name=f"{base['name']} {i}" if n > 1 else base["name"]) for i in range(1, n + 1)]
     return out
 
 
@@ -196,7 +202,8 @@ def describe(state: dict) -> str:
 def describe_event(ev: dict) -> str:
     counts: "dict[str, int]" = {}
     for tok in ev.get("tokens") or []:
-        counts[tok["name"]] = counts.get(tok["name"], 0) + 1
+        name = re.sub(r"\s+\d+$", "", tok["name"])   # "Wolf 2" counts as a Wolf
+        counts[name] = counts.get(name, 0) + 1
     who = ", ".join(f"{n}× {name}" if n > 1 else name for name, n in counts.items()) or "no tokens"
     lines = [f"EVENT: {ev['title']}  (map template {ev.get('template') or 'none'}; {who})"]
     if ev.get("hint"):
