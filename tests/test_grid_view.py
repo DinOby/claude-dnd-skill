@@ -77,6 +77,7 @@ console.log(JSON.stringify({
   },
   banners: [S._bannerFor(travel), S._bannerFor(event), S._bannerFor(stationary), S._bannerFor(null),
             S._bannerFor({ mode: 'travel', travel: { to: 'X', day: 0, days_total: 3 } })],
+  sizes: [G._nextSize('normal'), G._nextSize('large'), G._nextSize('full'), G._nextSize('bogus')],
   vfxHook: w.VfxOverlay.anchorFor === G.tokenCenter,
   anchorHidden: G.tokenCenter('Flerb'),
   found: ['Flerb', 'flerb', 'FLERB', 'Goblin 2', 'goblin-2', 'nobody', ''].map(r => {
@@ -112,6 +113,7 @@ class GridScriptTests(unittest.TestCase):
         self.assertEqual(self.out["registered"], ["vfx", "grid", "scene-mode"])   # page order: grid state before the rule
 
     def test_overlays_anchor_on_tokens(self):
+        self.assertEqual(self.out["sizes"], ["large", "full", "normal", "normal"])
         self.assertTrue(self.out["vfxHook"])                 # grid.js wires VfxOverlay.anchorFor
         self.assertIsNone(self.out["anchorHidden"])          # grid not on screen → overlay stays centred
         self.assertEqual(self.out["found"], ["flerb", "flerb", "flerb", "goblin-2", "goblin-2", None, None])
@@ -173,6 +175,8 @@ class PageWiringTests(unittest.TestCase):
         self.assertLess(order[-1], html.index("function connect()"))
         self.assertIn('id="mapview-row"', html)
         self.assertIn('id="mapview-label"', html)
+        self.assertIn('id="mapsize-row"', html)
+        self.assertIn('id="mapsize-label"', html)
 
     def test_stylesheets_exist(self):
         for name in ("grid.css", "scene-mode.css"):

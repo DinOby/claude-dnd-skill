@@ -3,11 +3,13 @@
  * The panel sits above the narration, between the character sidebar and the
  * settings column (grid.js copies the text column's side padding). While
  * body.grid-on is set the narration starts below the panel.
+ *
+ * Height = --grid-size (the "Map Size" setting: Normal / Large / Full) minus
+ * --grid-shift (room for the travel/event banner, set by scene-mode.css).
+ * Both are resolved on body, so size and banner combine.
  */
 
 :root {
-  --grid-h: 58vh;
-  --grid-top: 64px;
   --grid-line: rgba(232, 200, 130, 0.14);
   --grid-bg-a: #1d1710;
   --grid-bg-b: #120e09;
@@ -23,6 +25,15 @@
   --grid-bg-b: #e2d2ab;
   --grid-label: rgba(70, 50, 20, 0.6);
 }
+
+body {
+  --grid-top: 64px;
+  --grid-size: 58vh;
+  --grid-h: calc(var(--grid-size) - var(--grid-shift, 0px));
+}
+body.grid-size-large { --grid-size: 72vh; }
+/* Full: the map takes the height; a strip of 2–3 lines of narration stays above the party-input bar. */
+body.grid-size-full { --grid-top: 14px; --grid-size: calc(100vh - 14px - 18px - 80px - 110px); }
 
 #grid-panel {
   position: fixed;

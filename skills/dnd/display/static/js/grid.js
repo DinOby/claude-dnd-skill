@@ -29,6 +29,9 @@
   'use strict';
 
   const MOVE_MS = 450;
+  const SIZE_KEY = 'dnd-map-size';
+  const SIZES = ['normal', 'large', 'full'];
+  const SIZE_LABELS = { normal: 'Normal', large: 'Large', full: 'Full' };
   // Sprites stretched over their whole rectangle; every other type is tiled per square.
   const STRETCH = ['table', 'chair', 'bar', 'fireplace', 'door', 'well', 'log', 'stall', 'tent', 'wagon',
                    'fire', 'stairs', 'bridge', 'rug', 'bed', 'altar', 'chest', 'statue', 'shrine'];
@@ -36,6 +39,7 @@
   let map = null;
   let images = { floor: null, terrain: {}, tokens: {} };
   let turn = null;                 // name of the combatant whose turn it is
+  let size = 'normal';             // "Map Size" setting, per browser
   let visible = false;
   let panel = null, board = null, title = null;
   const tokenEls = new Map();      // token id → element
@@ -107,6 +111,31 @@
     if (extra.terrain) out.terrain = Object.assign({}, extra.terrain);
     Object.assign(out.tokens, extra.tokens || {});
     return out;
+  }
+
+  function nextSize(s) {
+    return SIZES[(SIZES.indexOf(s) + 1) % SIZES.length] || 'normal';
+  }
+
+  function applySize() {
+    if (typeof document === 'undefined') return;
+    for (const s of SIZES) document.body.classList.toggle('grid-size-' + s, s === size && s !== 'normal');
+    render();
+  }
+
+  function initSizeSetting() {
+    try { const v = localStorage.getItem(SIZE_KEY); if (SIZES.includes(v)) size = v; } catch (_) {}
+    applySize();
+    const row = document.getElementById('mapsize-row');
+    const label = document.getElementById('mapsize-label');
+    if (!row || !label) return;
+    label.textContent = SIZE_LABELS[size];
+    row.addEventListener('click', () => {
+      size = nextSize(size);
+      label.textContent = SIZE_LABELS[size];
+      try { localStorage.setItem(SIZE_KEY, size); } catch (_) {}
+      applySize();
+    });
   }
 
   /* Cell size (px) so cols×rows plus one label row/column fit into w×h. */
@@ -345,6 +374,7 @@
     _cellSize: cellSize,
     _spriteMode: spriteMode,
     _turnId: turnId,
+    _nextSize: nextSize,
     _findToken: findToken,
     _spriteBackground: spriteBackground,
     _mergeImages: mergeImages,
@@ -357,6 +387,11 @@
   // token while the grid is on screen; otherwise anchorFor returns null and
   // they stay centred.
   if (window.VfxOverlay && !window.VfxOverlay.anchorFor) window.VfxOverlay.anchorFor = tokenCenter;
+
+  if (typeof document !== 'undefined' && !(window.DisplayModules && DisplayModules.context.isPhone)) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSizeSetting);
+    else initSizeSetting();
+  }
 
   if (window.DisplayModules) {
     DisplayModules.register('grid', payload => {

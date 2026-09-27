@@ -55,7 +55,8 @@
 :root[data-theme="light"] #scene-banner .sb-sub { color: rgba(58, 42, 18, 0.75); }
 
 body.has-scene-banner #scene-indicator { opacity: 0; }
-body.has-scene-banner { --grid-top: 150px; --grid-h: 54vh; }
+body.has-scene-banner { --grid-top: 150px; --grid-shift: 40px; }
+body.has-scene-banner.grid-size-full { --grid-top: 150px; --grid-shift: 136px; }
 body.has-scene-banner:not(.grid-on) #text-scroll { padding-top: 160px; }
 body.has-scene-banner .grid-title { display: none; }   /* the banner already names the event */
 
