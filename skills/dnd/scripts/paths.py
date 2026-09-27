@@ -122,6 +122,15 @@ def user_assets_dir() -> pathlib.Path:
     return _root() / "assets"
 
 
+def maps_library_dir() -> pathlib.Path:
+    """Battle-map layouts shared by all campaigns (grid, terrain, background).
+
+    Update-safe; which tokens stand on a map is stored per campaign in
+    <campaign>/maps/. Not created on read.
+    """
+    return _root() / "maps" / "library"
+
+
 def campaigns_dir() -> pathlib.Path:
     """Return the campaigns directory under the configured root."""
     return _root() / "campaigns"

@@ -66,6 +66,17 @@ Usage:
 
     # Clear all text + stats (use on /dnd load — token-aware, works in LAN mode):
     python3 push_stats.py --clear
+
+    # Battle map (main display only). Positions: column letter + row, A1 = top-left.
+    python3 push_stats.py --map-set '{"id":"kessel-schankraum","cols":14,"rows":10,"terrain":[...],"tokens":[...]}'
+    python3 push_stats.py --map-set @map.json               # same, from a file
+    python3 push_stats.py --map-show kessel-schankraum       # library layout + this campaign's tokens
+    python3 push_stats.py --map-hide
+    python3 push_stats.py --stat-move "Flerb:D5" --stat-move "Goblin 1:E6"
+    python3 push_stats.py --token-add "Goblin 2:E7:enemy"    # NAME:POS[:pc|npc|enemy|object]
+    python3 push_stats.py --token-add '{"name":"Oger","kind":"enemy","at":"H3","size":2}'
+    python3 push_stats.py --token-remove "Goblin 1"
+    # Move/add/remove in one call apply together or not at all; problems are printed.
 """
 
 import sys
@@ -74,7 +85,9 @@ import argparse
 import os
 import ssl
 import time
+import urllib.error
 import urllib.request
+from typing import Optional
 
 # Windows CJK fix: piped stdout defaults to the system codepage (cp936/GBK),
 # which garbles or crashes on Chinese — force UTF-8.
@@ -119,6 +132,86 @@ def _send(url: str, data: bytes, token: str) -> None:
         urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX)
     except Exception:
         pass  # Display not running — fail silently
+
+
+def _post_map(body: dict, token: str) -> int:
+    """POST /map and print the outcome — map commands need feedback (bad square, unknown token)."""
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-DND-Token"] = token
+    req = urllib.request.Request(FLASK_URL.replace("/stats", "/map"), data=json.dumps(body).encode("utf-8"),
+                                 headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
+            result = json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            problems = json.loads(e.read() or b"{}").get("errors") or [f"HTTP {e.code}"]
+        except ValueError:
+            problems = [f"HTTP {e.code}"]
+        for p in problems:
+            print(f"map: {p}", file=sys.stderr)
+        return 1
+    except Exception:
+        print("map: display not reachable — nothing changed", file=sys.stderr)
+        return 0
+    for w in result.get("warnings") or []:
+        print(f"map warning: {w}", file=sys.stderr)
+    if result.get("map_id"):
+        print(f"map {result['map_id']} rev {result['rev']}")
+    return 0
+
+
+def _token_spec(spec: str) -> dict:
+    """'Goblin 2:E7[:enemy]' or a JSON object → token for a map patch."""
+    spec = spec.strip()
+    if spec.startswith("{"):
+        return json.loads(spec)
+    parts = spec.rsplit(":", 2)
+    if len(parts) == 3 and parts[2].strip().lower() in ("pc", "npc", "enemy", "object"):
+        name, pos, kind = parts[0], parts[1], parts[2].strip().lower()
+    else:
+        name, _, pos = spec.rpartition(":")
+        kind = "npc"
+    if not name.strip() or not pos.strip():
+        raise ValueError(f"expected NAME:POSITION[:KIND], got {spec!r}")
+    return {"name": name.strip(), "at": pos.strip(), "kind": kind}
+
+
+def _move_spec(spec: str) -> dict:
+    """'Flerb:D5' → {"id": "Flerb", "to": "D5"} (the server matches names too)."""
+    name, _, pos = spec.strip().rpartition(":")
+    if not name.strip() or not pos.strip():
+        raise ValueError(f"expected NAME:POSITION, got {spec!r}")
+    return {"id": name.strip(), "to": pos.strip()}
+
+
+def _map_body(args) -> "tuple[list[dict], Optional[str]]":
+    """Requests for /map from the --map-* / --stat-move / --token-* flags (in order)."""
+    bodies = []
+    try:
+        if args.map_set:
+            raw = args.map_set
+            if raw.startswith("@"):
+                with open(raw[1:], encoding="utf-8-sig") as f:
+                    raw = f.read()
+            bodies.append({"map": json.loads(raw)})
+        if args.map_show:
+            bodies.append({"show": args.map_show})
+        patch = {}
+        if args.stat_move:
+            patch["move"] = [_move_spec(s) for s in args.stat_move]
+        if args.token_add:
+            patch["add"] = [_token_spec(s) for s in args.token_add]
+        if args.token_remove:
+            patch["remove"] = [s.strip() for s in args.token_remove]
+        if patch:
+            bodies.append({"patch": patch})
+        if args.map_hide:
+            bodies.append({"hide": True})
+    except (ValueError, OSError) as e:
+        return [], str(e)
+    return bodies, None
 
 
 def main() -> None:
@@ -195,7 +288,24 @@ def main() -> None:
     parser.add_argument("--ruleset", metavar="2014|2024",
                         help="Override the ruleset badge displayed in the sidebar. "
                              "Normally the server resolves this from the campaign on --set-campaign.")
+    parser.add_argument("--map-set", metavar="JSON|@FILE",
+                        help="Show a full battle map (layout is saved to the map library)")
+    parser.add_argument("--map-show", metavar="ID",
+                        help="Show a map from the library with this campaign's tokens")
+    parser.add_argument("--map-hide", action="store_true", help="Take the battle map off screen")
+    parser.add_argument("--stat-move", metavar="NAME:POS", action="append",
+                        help='Move a token, e.g. "Flerb:D5" (repeatable)')
+    parser.add_argument("--token-add", metavar="NAME:POS[:KIND]", action="append",
+                        help='Add a token, e.g. "Goblin 2:E7:enemy", or a JSON object (repeatable)')
+    parser.add_argument("--token-remove", metavar="NAME", action="append",
+                        help="Remove a token by name or id (repeatable)")
     args = parser.parse_args()
+
+    # ── Battle map (own endpoint; may be combined with stat flags) ────────────
+    map_bodies, map_error = _map_body(args)
+    if map_error:
+        print(f"map: {map_error}", file=sys.stderr)
+        sys.exit(1)
 
     payload: dict = {}
 
@@ -366,14 +476,21 @@ def main() -> None:
     # ── Clear display ─────────────────────────────────────────────────────────
     if args.clear:
         _send(FLASK_URL.replace("/stats", "/clear"), b"", _read_token())
-        if not payload:
+        if not payload and not map_bodies:
             return
 
+    rc = 0
+    for body in map_bodies:
+        rc = _post_map(body, _read_token()) or rc
+        if rc:
+            break
     if not payload:
-        print("Nothing to push. Use --help for usage.", file=sys.stderr)
-        return
+        if not map_bodies:
+            print("Nothing to push. Use --help for usage.", file=sys.stderr)
+        sys.exit(rc)
 
     _send(FLASK_URL, json.dumps(payload).encode("utf-8"), _read_token())
+    sys.exit(rc)
 
 
 if __name__ == "__main__":

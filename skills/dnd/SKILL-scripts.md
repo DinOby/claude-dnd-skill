@@ -229,6 +229,22 @@ python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --autorun-threshold 2   # fire
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --autorun-threshold 0   # reset to player count
 ```
 
+**Battle map (main display only, never phones):** positions are column letter + row number, `A1` = top-left (`D5` = 4th column, 5th row; after `Z` come `AA`, `AB`). The layout (grid, terrain, background) is saved to `<data-root>/maps/library/` and reused by every campaign; which tokens stand on it is saved per campaign in `<campaign>/maps/`.
+```bash
+PS="python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py"
+$PS --map-set '{"id":"kessel-schankraum","name":"Schankraum","cols":14,"rows":10,
+  "background":{"asset":"map:taverne"},
+  "terrain":[{"at":"A1","w":14,"type":"wall"},{"at":"F5","w":3,"type":"table"}],
+  "tokens":[{"name":"Flerb","kind":"pc","at":"C6"},{"name":"Goblin","kind":"enemy","at":"J6"}]}'
+$PS --map-show kessel-schankraum          # library layout + this campaign's tokens
+$PS --stat-move "Flerb:D5" --stat-move "Goblin:E6"
+$PS --token-add "Goblin:K7:enemy"         # second Goblin gets id goblin-2; kinds pc|npc|enemy|object
+$PS --token-add '{"name":"Oger","kind":"enemy","at":"H3","size":2}'
+$PS --token-remove "Goblin 2"             # by name or id
+$PS --map-hide
+```
+Moves, adds and removes in one call apply together or not at all; rejected commands print every reason (`Z99 is outside the 14×10 grid`, `no token 'Geist'`) and exit 1. Warnings (token on a wall, two tokens on one square) are printed but applied. `--map-set` without `tokens` keeps the campaign's saved tokens. The browser grid view comes in a later step; until then the commands only store and broadcast the map.
+
 **Player input queue — `display/check_input.py`:**
 ```bash
 # Called at the start of each turn BEFORE processing the player's message.

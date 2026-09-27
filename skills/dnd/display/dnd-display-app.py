@@ -90,6 +90,16 @@ _item_categories = _ItemCategorizer()
 _assets = _asset_store.AssetStore(categorize=_item_categories)
 _asset_queue = _PendingQueue(os.path.join(_assets.global_root, "pending-assets.json"))
 
+# Battle-grid maps (main display only): layouts shared across campaigns in the
+# library, token placement per campaign — see grid_map.py
+import grid_map as _grid_map
+try:
+    from paths import maps_library_dir as _maps_library_dir
+    _MAP_LIBRARY = str(_maps_library_dir())
+except Exception:
+    _MAP_LIBRARY = os.path.join(os.path.expanduser("~/.claude/dnd"), "maps", "library")
+_maps = _grid_map.MapStore(_MAP_LIBRARY, rt("maps"))
+
 
 def _campaign_flag_list(flag: str) -> "Optional[list[str]]":
     """Comma list from a Session Flag in the active campaign's state.md.
@@ -145,10 +155,24 @@ def _apply_campaign_assets() -> None:
     _assets.set_campaign_root(root)
 
 
+def _apply_campaign_maps() -> None:
+    """Token placement lives in the active campaign's maps/ (runtime dir without one)."""
+    placement = rt("maps")
+    try:
+        camp = open(rt(".campaign"), encoding="utf-8").read().strip()
+        if camp:
+            placement = str(_find_campaign(camp) / "maps")
+    except (OSError, ValueError):
+        pass
+    if placement != _maps.placement_dir:
+        _maps.set_placement_dir(placement)
+
+
 def _on_campaign_change() -> None:
     """Re-read everything that depends on the active campaign."""
     _apply_campaign_languages()
     _apply_campaign_assets()
+    _apply_campaign_maps()
 
 
 _on_campaign_change()
@@ -1170,6 +1194,17 @@ def _broadcast(payload: dict) -> None:
             _client_chars.pop(q, None)
 
 
+def _broadcast_main(payload: dict) -> None:
+    """Like _broadcast, but only to main displays — phones never get the map."""
+    with _clients_lock:
+        targets = [q for q in _clients if q not in _client_chars]
+    for q in targets:
+        try:
+            q.put_nowait(payload)
+        except queue.Full:
+            pass   # _broadcast drops dead clients
+
+
 # ─── Routes ──────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -2107,6 +2142,54 @@ def assets_changed():
     return "", 204
 
 
+@app.route("/map", methods=["GET"])
+def map_get():
+    """Map on screen (or null) and the layouts in the library."""
+    return jsonify({"map": _maps.current(), "library": _maps.library()})
+
+
+@app.route("/map", methods=["POST"])
+def map_post():
+    """Change the battle map (push_stats.py --map-* / --stat-move / --token-*).
+
+    Body, one of:
+        {"map": {...full map...}}    show it; layout goes to the library
+        {"show": "kessel-schankraum"} show a library map with this campaign's tokens
+        {"patch": {"move": [...], "add": [...], "remove": [...]}}
+        {"hide": true}               take the map off screen
+    Returns {"map_id", "rev", "warnings"}; 400 {"errors": [...]} when rejected
+    (a rejected patch changes nothing).
+    """
+    if not _token_ok():
+        return "Forbidden", 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"errors": ["body should be a JSON object"]}), 400
+    warnings: list = []
+    try:
+        if data.get("hide"):
+            _maps.hide()
+            _broadcast_main({"map": None})
+            return jsonify({"map_id": None, "rev": None, "warnings": []})
+        if "map" in data:
+            m = _maps.set_map(data["map"])
+        elif "show" in data:
+            m = _maps.show(str(data["show"]))
+        elif "patch" in data:
+            applied, warnings = _maps.patch(data["patch"])
+            _broadcast_main({"map_patch": applied})
+            return jsonify({"map_id": applied["map_id"], "rev": applied["rev"], "warnings": warnings})
+        else:
+            return jsonify({"errors": ["expected map, show, patch or hide"]}), 400
+    except _grid_map.MapError as e:
+        return jsonify({"errors": e.problems}), 400
+    except OSError as e:
+        return jsonify({"errors": [f"could not save the map: {e}"]}), 500
+    warnings = [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
+    _broadcast_main({"map": m})
+    return jsonify({"map_id": m["id"], "rev": m["rev"], "warnings": warnings})
+
+
 @app.route("/clear", methods=["POST"])
 def clear():
     """Wipe text log AND stats, broadcast clear to all connected browsers.
@@ -2730,6 +2813,12 @@ def stream():
         recent = list(_text_log)[-200:]
     if recent:
         q.put_nowait({"replay_batch": recent})
+
+    # The battle map goes to main displays only (phones never render it).
+    if not _ch:
+        _m = _maps.current()
+        if _m:
+            q.put_nowait({"map": _m})
 
     # Send current stats so the sidebar is populated immediately on (re)connect.
     with _stats_lock:

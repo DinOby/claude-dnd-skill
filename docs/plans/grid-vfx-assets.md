@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), weiter mit Phase D
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritt 10 fertig, weiter mit 11
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -249,9 +249,20 @@ Kampf ist kein eigener Zustand; er findet auf der Karte der aktuellen Szene stat
 ```
 
 - Teil-Updates: `{"map_patch":{"map_id":"…","move":[…],"add":[…],"remove":[…]}}`.
-- Koordinaten für den DM in Schach-Notation (`D5`).
-- **Aufbau** (Raster, Hindernisse, Bild) liegt in `maps/library/` und wird
-  kampagnenübergreifend wiederverwendet; **Belegung** (Figuren) pro Kampagne.
+  Alles oder nichts: ein fehlerhafter Teil lehnt den ganzen Patch mit allen
+  Gründen ab; Auffälliges (Figur auf Wand, zwei Figuren auf einem Feld) kommt
+  als Warnung zurück. Jede Änderung erhöht `rev`; der Browser erhält den
+  Patch mit `base`/`rev` und holt bei Lücken `GET /map` neu.
+- Koordinaten für den DM in Schach-Notation (`D5`), `A1` = oben links,
+  nach `Z` folgen `AA`, `AB`; in JSON 0-basiert `x`/`y`, überall auch `"at": "D5"`.
+- Figuren: `kind` `pc | npc | enemy | object`, `size` 1–4 Felder; `id` aus dem
+  Namen (`goblin`, `goblin-2`), Befehle akzeptieren Name oder id.
+- Server: `grid_map.py` (Modell, Patches, `MapStore`), Route `/map`
+  (`map | show | patch | hide`), SSE nur an den Hauptbildschirm.
+- **Aufbau** (Raster, Hindernisse, Bild) liegt in `<data-root>/maps/library/` und wird
+  kampagnenübergreifend wiederverwendet; **Belegung** (Figuren) pro Kampagne in
+  `<kampagne>/maps/<id>.json`, die gezeigte Karte in `<kampagne>/maps/active.json`
+  (ohne Kampagne im Runtime-Ordner). Umgesetzt in Schritt 10.
 - **Vorlagen** in `map-templates/` mit `spawn`-Feldern für Gruppe, Gegner, NSC
   (`tavern-small`, `market-square`, `forest-road`, `forest-clearing`,
   `mountain-pass`, `bridge`, `camp`, `cave-mouth`, `dungeon-corridor`, `ruins`).
@@ -262,8 +273,10 @@ Kampf ist kein eigener Zustand; er findet auf der Karte der aktuellen Szene stat
 
 ### Befehle
 
-`push_stats.py`/`send.py`: `--scene-set`, `--stat-move "Flerb:D5"`,
-`--token-add`, `--token-remove`.
+`push_stats.py`: `--map-set JSON|@datei`, `--map-show ID`, `--map-hide`,
+`--stat-move "Flerb:D5"`, `--token-add "Goblin 2:E7:enemy"` (oder JSON),
+`--token-remove NAME` (alle wiederholbar, ein Aufruf = ein Patch);
+`--scene-set` folgt mit Schritt 12.
 
 Reisen laufen über `scripts/travel.py`:
 
@@ -301,7 +314,8 @@ Jeder Schritt ein eigener PR mit Tests.
 **Phase D – Grid und Szenenzustände**
 10. Kartenmodell, Teil-Updates, Schach-Koordinaten, `--stat-move`, `--token-*`, Speicherung.
 11. Kartenvorlagen und Platzierung auf `spawn`-Feldern; Hintergrund aus der Seed-Karte der Vorlage.
-12. `scene_state`-Zustandsmaschine, Bibliothek/Belegung getrennt, `travel.py` mit automatischer Ereignis-Probe.
+12. `scene_state`-Zustandsmaschine, `travel.py` mit automatischer Ereignis-Probe
+    (Trennung Bibliothek/Belegung ist schon mit Schritt 10 umgesetzt).
 12b. `/dm:dnd maps list|reset|restore`.
 13. `grid.js`: Raster, Figuren mit Initialen, animierte Bewegung.
 14. `scene-mode.js`: Anzeigeregel, Reise- und Ereignis-Banner; nicht auf Handys.
