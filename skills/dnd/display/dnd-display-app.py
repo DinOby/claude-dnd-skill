@@ -81,6 +81,10 @@ try:
 except Exception:
     _vfx = None   # type: ignore
 
+# Content images (items, tokens, maps) with category placeholders
+import asset_store as _asset_store
+_assets = _asset_store.AssetStore()
+
 
 def _campaign_flag_list(flag: str) -> "Optional[list[str]]":
     """Comma list from a Session Flag in the active campaign's state.md.
@@ -124,7 +128,25 @@ def _apply_campaign_languages() -> None:
         _vfx.set_languages(_campaign_flag_list("vfx_languages"))
 
 
-_apply_campaign_languages()
+def _apply_campaign_assets() -> None:
+    """Point the asset store at the active campaign's own assets/ (if any)."""
+    root = None
+    try:
+        camp = open(rt(".campaign"), encoding="utf-8").read().strip()
+        if camp:
+            root = str(_find_campaign(camp) / "assets")
+    except (OSError, ValueError):
+        pass
+    _assets.set_campaign_root(root)
+
+
+def _on_campaign_change() -> None:
+    """Re-read everything that depends on the active campaign."""
+    _apply_campaign_languages()
+    _apply_campaign_assets()
+
+
+_on_campaign_change()
 
 HELP_LOCK     = rt(".help-lock")
 CAMP_FILE     = rt(".campaign")
@@ -1653,7 +1675,7 @@ def stats():
             _load_tail()
         except Exception:
             pass
-        _apply_campaign_languages()
+        _on_campaign_change()
         # Resolve and stash the ruleset for this campaign so the sidebar badge
         # can render. Defaults to '2014' for legacy campaigns predating the
         # ruleset field. Wrapped in try/except so a missing paths import or
@@ -2000,6 +2022,51 @@ def vfx_icon(name):
     if not found:
         return "Not found", 404
     return send_from_directory(found[0], found[1], max_age=3600)
+
+
+_ASSET_RESOLVE_MAX = 100
+
+
+@app.route("/assets/resolve")
+def assets_resolve():
+    """Image URL or category placeholder for content names, in one round trip.
+
+    Query: kind=item|token|map, name=<n> (repeatable, max 100),
+           category=<c> (optional, applies to every name).
+    Returns {"items": [{"name","key","url","category","placeholder"}, …]}.
+    """
+    kind = request.args.get("kind", "item")
+    if kind not in _asset_store.KINDS:
+        return jsonify({"error": "unknown kind"}), 400
+    names = [n.strip()[:120] for n in request.args.getlist("name") if n.strip()]
+    category = request.args.get("category") or None
+    items = [_assets.resolve(kind, n, category) for n in names[:_ASSET_RESOLVE_MAX]]
+    return jsonify({"items": items}), 200
+
+
+@app.route("/assets/file/<scope>/<path:rel>")
+def assets_file(scope, rel):
+    """An image referenced by a manifest (global or campaign scope)."""
+    path = _assets.file_for(scope, rel)
+    if not path:
+        return "Not found", 404
+    return send_from_directory(os.path.dirname(path), os.path.basename(path), max_age=86400)
+
+
+@app.route("/assets/placeholder/<name>")
+def assets_placeholder(name):
+    """Category placeholder SVG; unknown categories get the generic one."""
+    directory, filename = _asset_store.placeholder_file(name.removesuffix(".svg"))
+    return send_from_directory(directory, filename, mimetype="image/svg+xml", max_age=86400)
+
+
+@app.route("/assets/changed", methods=["POST"])
+def assets_changed():
+    """Tell every browser to drop its image cache (called after `assets.py generate`)."""
+    if not _token_ok():
+        return "Forbidden", 403
+    _broadcast({"assets_changed": True})
+    return "", 204
 
 
 @app.route("/clear", methods=["POST"])

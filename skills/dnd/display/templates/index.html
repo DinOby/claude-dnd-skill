@@ -3855,6 +3855,7 @@
      the main script (which opens the SSE stream). See static/js/modules.js. -->
 <script src="/static/js/modules.js"></script>
 <script src="/static/js/vfx.js"></script>
+<script src="/static/js/assets.js"></script>
 
 <script>
 'use strict';
@@ -5921,6 +5922,7 @@ function openSheet(name) {
       list.appendChild(li);
     });
     content.appendChild(list);
+    if (window.AssetResolver) AssetResolver.decorate(list, 'item');
   }
 
   // Relationships

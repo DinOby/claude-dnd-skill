@@ -1,0 +1,21 @@
+/* assets.css — thumbnails for game content (see static/js/assets.js). */
+
+.asset-thumb {
+  width: 1.9em;
+  height: 1.9em;
+  object-fit: contain;
+  vertical-align: middle;
+  margin-right: 0.55em;
+  border-radius: 6px;
+  flex: none;
+}
+
+.asset-thumb.is-placeholder { opacity: 0.75; }
+
+/* Inventory rows: the thumbnail replaces the bullet. */
+.sm-inventory-list li.has-asset-thumb {
+  display: flex;
+  align-items: center;
+  padding-left: 0;
+}
+.sm-inventory-list li.has-asset-thumb::before { content: none; }
