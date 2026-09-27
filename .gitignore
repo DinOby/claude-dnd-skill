@@ -42,3 +42,8 @@ venv/
 
 # macOS
 .DS_Store
+
+# Secrets — API keys and env files must never be committed
+*.key
+.env
+.env.*
