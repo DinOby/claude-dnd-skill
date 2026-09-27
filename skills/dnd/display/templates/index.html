@@ -3847,6 +3847,10 @@
 </div>
 <button id="new-content-pill" type="button" aria-label="Jump to newest narration">New ↓</button>
 
+<!-- Feature modules: modules.js first, then one tag per feature, all before
+     the main script (which opens the SSE stream). See static/js/modules.js. -->
+<script src="/static/js/modules.js"></script>
+
 <script>
 'use strict';
 
@@ -7636,6 +7640,9 @@ function connect() {
         handleIncomingText(payload.text);
       }
     }
+
+    // Feature modules see every message after the built-in rendering.
+    if (window.DisplayModules) DisplayModules.dispatch(payload);
   };
 
   evtSource.onerror = () => {
