@@ -13,7 +13,7 @@ Usage:
     python3 assets.py add KEY FILE [--category C] [--name "Display Name"]
     python3 assets.py skip KEY [KEY ...]         # never generate these
     python3 assets.py retry [KEY ...]            # failed/skipped → pending (all failed if no KEY)
-    python3 assets.py seed [--category items|portraits|maps ...] [--limit N] [--provider NAME] [--dry-run]
+    python3 assets.py seed [--category items|portraits|maps|sprites ...] [--limit N] [--provider NAME] [--dry-run]
                                                  # standard content from config/asset-seed.json
 
 KEY is "item:Flammenschwert der Asche", "token:Wirtin Hilde", "map:…" or a

@@ -14,7 +14,19 @@
     {"at": "M4", "w": 1, "h": 2, "type": "fireplace"},
     {"at": "E5", "w": 2, "h": 1, "type": "table"},
     {"at": "I5", "w": 2, "h": 1, "type": "table"},
-    {"at": "F8", "w": 2, "h": 1, "type": "table"}
+    {"at": "F8", "w": 2, "h": 1, "type": "table"},
+    {"at": "E4", "w": 1, "h": 1, "type": "chair"},
+    {"at": "F4", "w": 1, "h": 1, "type": "chair"},
+    {"at": "E6", "w": 1, "h": 1, "type": "chair"},
+    {"at": "F6", "w": 1, "h": 1, "type": "chair"},
+    {"at": "I4", "w": 1, "h": 1, "type": "chair"},
+    {"at": "J4", "w": 1, "h": 1, "type": "chair"},
+    {"at": "I6", "w": 1, "h": 1, "type": "chair"},
+    {"at": "J6", "w": 1, "h": 1, "type": "chair"},
+    {"at": "F7", "w": 1, "h": 1, "type": "chair"},
+    {"at": "G7", "w": 1, "h": 1, "type": "chair"},
+    {"at": "F9", "w": 1, "h": 1, "type": "chair"},
+    {"at": "G9", "w": 1, "h": 1, "type": "chair"}
   ],
   "spawn": {
     "pc": [{"at": "B8", "w": 4, "h": 2}],

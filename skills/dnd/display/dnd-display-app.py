@@ -2162,10 +2162,86 @@ def assets_changed():
     return "", 204
 
 
+_TOKEN_NUMBER = re.compile(r"[\s\-_]*\d+$")
+
+
+def _token_candidates(tok: dict) -> list:
+    """Where a token's picture may come from, best first: its own asset, its
+    name, the name without a number ("Goblin 2" → Goblin), its archetype."""
+    name = tok.get("name") or ""
+    base = _TOKEN_NUMBER.sub("", name).strip()
+    out = [tok.get("asset"), name, base if base != name else None, tok.get("archetype")]
+    return [c for c in out if c]
+
+
+def _map_images(m: "Optional[dict]", tokens: "Optional[list]" = None) -> dict:
+    """Image URLs for a map (or only `tokens`): {"floor", "terrain": {type: url}, "tokens": {id: url}}.
+
+    Missing pictures go on the wait-list — never generated during play:
+    tokens by name without number (with race/class as hint for player
+    characters), terrain types as sprite:<type>, the floor as its map key.
+    Event maps are temporary, so their floor is not queued.
+    """
+    if not m:
+        return {}
+    only_tokens = tokens is not None
+    tokens = m.get("tokens", []) if tokens is None else tokens
+    images: dict = {"tokens": {}}
+    missing: list = []
+    try:
+        camp = open(CAMP_FILE, encoding="utf-8").read().strip() or None
+    except OSError:
+        camp = None
+    with _stats_lock:
+        players = {str(p.get("name", "")).casefold(): p for p in _current_stats.get("players", [])}
+    for tok in tokens:
+        if tok.get("hidden"):
+            continue
+        url = _assets.first_url("token", _token_candidates(tok))
+        images["tokens"][tok["id"]] = url
+        if not url and tok.get("kind") != "object":
+            base = _TOKEN_NUMBER.sub("", tok.get("name", "")).strip() or tok.get("name", "")
+            p = players.get(tok.get("name", "").casefold()) or {}
+            hint = " ".join(str(p.get(k)) for k in ("race", "class") if p.get(k)) or None
+            missing.append({"key": _asset_store.make_key("token", base), "kind": "token", "name": base,
+                            "category": tok.get("kind") if tok.get("kind") in ("pc", "npc", "enemy") else "npc",
+                            "campaign": camp, "hint": hint})
+    if not only_tokens:
+        floor = ((m.get("background") or {}).get("asset")) or None
+        images["floor"] = _assets.first_url("map", [floor]) if floor else None
+        if floor and not images["floor"] and not m.get("temporary"):
+            key_kind, _, key_name = floor.partition(":")
+            if key_kind == "map" and key_name:
+                missing.append({"key": _asset_store.make_key("map", key_name), "kind": "map",
+                                "name": key_name, "category": "map", "campaign": camp})
+        images["terrain"] = {}
+        for t in m.get("terrain", []):
+            if t["type"] in images["terrain"]:
+                continue
+            url = _assets.first_url("sprite", [t["type"]])
+            images["terrain"][t["type"]] = url
+            if not url:
+                missing.append({"key": _asset_store.make_key("sprite", t["type"]), "kind": "sprite",
+                                "name": t["type"], "category": "sprite"})
+    missing = [i for i in missing if i["key"]]
+    if missing:
+        try:
+            _asset_queue.add_many(missing)
+        except Exception as e:
+            print(f"asset queue: {e}", file=sys.stderr)
+    return images
+
+
+def _map_message(m: "Optional[dict]") -> dict:
+    """SSE payload for a full map: the map plus its image URLs (the model itself stays URL-free)."""
+    return {"map": m, "map_images": _map_images(m)} if m else {"map": None}
+
+
 @app.route("/map", methods=["GET"])
 def map_get():
-    """Map on screen (or null), the layouts in the library and the templates."""
-    return jsonify({"map": _maps.current(), "library": _maps.library(),
+    """Map on screen (or null) with its images, the layouts in the library and the templates."""
+    m = _maps.current()
+    return jsonify({"map": m, "images": _map_images(m), "library": _maps.library(),
                     "templates": _maps.templates.list()})
 
 
@@ -2207,7 +2283,7 @@ def _reconcile_scene(broadcast: bool = True, full: bool = True) -> "list[str]":
                                   temporary=True)
                 warnings += [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
             if broadcast:
-                _broadcast_main({"map": m})
+                _broadcast_main(_map_message(m))
     except (_grid_map.MapError, OSError) as e:
         warnings.append(f"map for the scene not shown: {e}")
     if broadcast and state["mode"] in ("travel", "travel_event"):
@@ -2288,7 +2364,8 @@ def map_post():
                     return jsonify({"map_id": (_maps.current() or {}).get("id"), "rev": None,
                                     "warnings": ["every player character is already on the map"]})
             applied, warnings = _maps.patch(patch)
-            _broadcast_main({"map_patch": applied})
+            _broadcast_main({"map_patch": applied,
+                             "map_images": _map_images(_maps.current(), applied.get("add", []))})
             return jsonify({"map_id": applied["map_id"], "rev": applied["rev"], "warnings": warnings})
         else:
             return jsonify({"errors": ["expected map, show, patch or hide"]}), 400
@@ -2297,7 +2374,7 @@ def map_post():
     except OSError as e:
         return jsonify({"errors": [f"could not save the map: {e}"]}), 500
     warnings = [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
-    _broadcast_main({"map": m})
+    _broadcast_main(_map_message(m))
     if _scenes.get().get("map_id") != m["id"]:
         _broadcast_main({"scene_state": _scenes.update(map_id=m["id"])})   # the scene's map now
     return jsonify({"map_id": m["id"], "rev": m["rev"], "warnings": warnings})
@@ -2968,7 +3045,7 @@ def stream():
         q.put_nowait({"scene_state": _scenes.get()})
         _m = _maps.current()
         if _m:
-            q.put_nowait({"map": _m})
+            q.put_nowait(_map_message(_m))
 
     # Send current stats so the sidebar is populated immediately on (re)connect.
     with _stats_lock:

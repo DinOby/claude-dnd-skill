@@ -111,12 +111,20 @@ class GenerateTests(_Case):
         self.assertEqual({e["status"] for e in self.queue.entries()}, {"done"})
 
     def test_dry_run_changes_nothing(self):
-        self.queue_items("Dolch")
+        self.queue_items("Knochendolch")
         summary = self.p.generate(dry_run=True)
-        self.assertEqual(summary["planned"][0]["key"], "item:dolch")
-        self.assertIn("Dolch", summary["planned"][0]["prompt"])
+        self.assertEqual(summary["planned"][0]["key"], "item:knochendolch")
+        self.assertIn("Knochendolch", summary["planned"][0]["prompt"])
         self.assertFalse((self.assets / "items").exists())
         self.assertEqual(self.queue.entries()[0]["status"], "pending")
+
+    def test_wait_list_entry_borrows_the_seed_prompt(self):
+        self.queue_items("Dolch")                                   # in the seed catalogue, no own prompt
+        self.queue.add_many([{"key": "item:langschwert", "kind": "item", "name": "Langschwert",
+                              "hint": "Klinge mit Runen"}])        # campaign hint → not the generic prompt
+        planned = {p["key"]: p["prompt"] for p in self.p.generate(dry_run=True)["planned"]}
+        self.assertTrue(planned["item:dolch"].startswith("A plain steel dagger"))
+        self.assertIn("Klinge mit Runen", planned["item:langschwert"])
 
     def test_limit_keys_and_skip(self):
         self.queue_items("A-Schwert", "B-Schwert", "C-Schwert")

@@ -1,6 +1,6 @@
 # Plan: Grid-Ansicht, Aktions-Einblendungen, Asset-System
 
-Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–14 fertig, weiter mit 15
+Stand: 2026-09-27 · Status: Phase A–C abgeschlossen (Schritte 1–9b), Phase D: Schritte 10–15 fertig, weiter mit 16
 
 Drei Erweiterungen des Display-Companions (`skills/dnd/display/`). Grundprinzip:
 modular, austauschbare Teile (Bildquelle, Icon-Sets, Trigger-Logik),
@@ -128,7 +128,7 @@ die Bilder. Läuft auch ohne Claude und im Hintergrund.
 
 Die Warteliste erfährt von Inhalten erst, wenn sie im Spiel auftauchen.
 Kampagnenunabhängige Standardinhalte sind vorher bekannt und werden mit
-`scripts/assets.py seed [--category items|portraits|maps] [--limit N] [--provider X] [--dry-run]`
+`scripts/assets.py seed [--category items|portraits|maps|sprites] [--limit N] [--provider X] [--dry-run]`
 (`/dm:dnd assets seed`) einmal erzeugt und von allen Kampagnen genutzt:
 
 - **items** — Standardausrüstung aus dem SRD (Langschwert, Heiltrank,
@@ -161,7 +161,7 @@ generischem Schlüssel (`item:langschwert`, `token:goblin`, `map:taverne`) und
   ersetzt werden: `assets.py prompt KEY "…" --add`, dann `generate`.
 - Fehlschläge werden nicht gespeichert; der nächste `seed`-Lauf versucht es erneut.
 
-Voller Katalog ≈ 95 Bilder ≈ 3,20 $ mit dem Standardmodell; `--dry-run` zeigt
+Voller Katalog ≈ 119 Bilder ≈ 4 $ mit dem Standardmodell (seit Schritt 15: `maps` = Bodenbeläge, dazu 24 `sprites`); `--dry-run` zeigt
 vorher Anzahl und Prompts.
 
 ### Bilddienst-Schnittstelle
@@ -356,7 +356,18 @@ Jeder Schritt ein eigener PR mit Tests.
 12b. `/dm:dnd maps list|reset|restore`.
 13. `grid.js`: Raster, Figuren mit Initialen, animierte Bewegung.
 14. `scene-mode.js`: Anzeigeregel, Reise- und Ereignis-Banner; nicht auf Handys.
-15. Figuren über `AssetResolver`, Markierung der Figur am Zug, Kartenbilder, Warteliste für Figuren/Karten.
-    Figuren ohne eigenes Bild können über `archetype` (z. B. `token:zwergischer-kleriker`) auf ein generisches Portrait zurückfallen.
+15. Bilder auf der Karte (Entscheidung 2026-09-27 nach Durchsicht der Rasteransicht):
+    - **Kein Gesamtbild pro Karte** — ein KI-Bild setzt Möbel nicht auf die Hindernis-Felder.
+      Stattdessen **Bodenbelag** (der Hintergrund `map:<szene>` der Vorlage, gekachelt) und
+      **Einzelbilder pro Terrain-Typ** (`sprite:table`, `sprite:chair`, `sprite:bar` …), die genau
+      auf ihren Feldern liegen; Möbel gestreckt, Natur (Bäume, Felsen) und Flächen (Wand, Wasser) gekachelt.
+    - Sprites **freigestellt**: erzeugt vor magentafarbener Fläche, Pillow schneidet sie heraus
+      (Pillow damit Pflicht; ohne Pillow werden Sprites nicht erzeugt). Neue Bildart `sprite`.
+    - Neuer Terrain-Typ `chair` (Stühle an den Tischen der Taverne).
+    - **Figuren als rundes Porträt mit Farbring** nach Art: eigenes Bild → Name ohne Nummer
+      (`Goblin 2` → `token:goblin`) → `archetype` → Scheibe mit Initialen.
+    - Der Server ergänzt beim Senden die Bild-URLs (`images`), das Kartenmodell bleibt ohne URLs.
+    - Warteliste: Figuren und unbekannte Terrain-Typen ohne Bild; Spielercharaktere mit Volk/Klasse als Hinweis.
+    - Markierung der Figur am Zug (`turn_order.current`).
 16. `SKILL.md`/`SKILL-commands.md`: wann `--scene-set`, `travel.py start|day|arrive`, `event-end`; `combat start` legt nur bei Bedarf eine Karte an. Testsitzung.
 17. *(Optional)* Einblendungen über der Figur der handelnden Person.

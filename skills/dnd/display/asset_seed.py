@@ -14,7 +14,12 @@ The catalogue is plugin config (config/asset-seed.json, override in
                                    "prompt": "a straight double-edged steel longsword …"}},
      "portraits": {"goblin": {"name": "Goblin", "category": "enemy", "prompt": "…"}},
      "maps":      {"taverne": {"name": "Taverne", "category": "map",
-                               "template": "tavern-small", "prompt": "…"}}}
+                               "template": "tavern-small", "prompt": "…"}},
+     "sprites":   {"table": {"name": "Table", "category": "sprite", "prompt": "…"}}}
+
+maps are the floor textures of the battle grid (tiled under it); sprites are
+the objects on it, keyed by terrain type (sprite:table), cut out after
+generation. Sets missing from a user override default to empty.
 
 Sets are objects keyed by slug so an override can add or remove (null) single
 entries. The slug must be the key slug of `name`, so the generic key is the
@@ -34,17 +39,20 @@ from asset_store import DEFAULT_CATEGORY, ITEM_CATEGORIES, TOKEN_CATEGORIES, mak
 from config_loader import ConfigFile, check_types
 
 # set name (CLI --category) → asset kind
-SETS = {"items": "item", "portraits": "token", "maps": "map"}
-_SET_CATEGORIES = {"items": ITEM_CATEGORIES, "portraits": TOKEN_CATEGORIES, "maps": ("map",)}
+SETS = {"items": "item", "portraits": "token", "maps": "map", "sprites": "sprite"}
+_SET_CATEGORIES = {"items": ITEM_CATEGORIES, "portraits": TOKEN_CATEGORIES, "maps": ("map",),
+                   "sprites": ("sprite",)}
 
 
 def validate_seed_config(cfg: dict) -> "list[str]":
-    problems = check_types(cfg, {"version": int, **{s: dict for s in SETS}})
+    problems = check_types(cfg, {"version": int, **{s: dict for s in SETS if s != "sprites"}})
+    if "sprites" in cfg and not isinstance(cfg["sprites"], dict):
+        problems.append("sprites should be an object")
     if problems:
         return problems
     for set_name, kind in SETS.items():
         aliases: "dict[str, str]" = {}
-        for slug, entry in cfg[set_name].items():
+        for slug, entry in (cfg.get(set_name) or {}).items():
             where = f"{set_name}.{slug}"
             if not isinstance(entry, dict):
                 problems.append(f"{where} should be an object")

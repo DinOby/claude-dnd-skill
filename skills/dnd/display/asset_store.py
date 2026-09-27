@@ -33,12 +33,12 @@ from typing import Callable, Iterable, Optional
 _HERE = os.path.dirname(os.path.abspath(__file__))
 PLACEHOLDER_DIR = os.path.join(_HERE, "assets", "placeholders")
 
-KINDS = ("item", "token", "map")
+KINDS = ("item", "token", "map", "sprite")   # sprite: a map object (table, tree …), cut out
 ITEM_CATEGORIES = ("weapon", "armor", "potion", "scroll", "ring", "wand",
                    "wondrous", "tool", "gear")
 TOKEN_CATEGORIES = ("pc", "npc", "enemy")
-CATEGORIES = ITEM_CATEGORIES + TOKEN_CATEGORIES + ("map",)
-DEFAULT_CATEGORY = {"item": "gear", "token": "npc", "map": "map"}
+CATEGORIES = ITEM_CATEGORIES + TOKEN_CATEGORIES + ("map", "sprite")
+DEFAULT_CATEGORY = {"item": "gear", "token": "npc", "map": "map", "sprite": "sprite"}
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg")
 
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
@@ -286,6 +286,21 @@ class AssetStore:
             cat = DEFAULT_CATEGORY[kind]
         return {"name": name, "key": key, "url": url, "category": cat,
                 "placeholder": placeholder_url(cat)}
+
+    def first_url(self, kind: str, names) -> Optional[str]:
+        """URL of the first name (or "kind:slug" key) in `names` that has an image, else None."""
+        for name in names:
+            if not name:
+                continue
+            k, sep, rest = str(name).partition(":")
+            if sep and k in KINDS:
+                kind_, name_ = k, rest
+            else:
+                kind_, name_ = kind, name
+            info = self.resolve(kind_, name_, DEFAULT_CATEGORY[kind_])
+            if info["url"]:
+                return info["url"]
+        return None
 
     def has_image(self, kind: str, name: str) -> bool:
         key = self._key_for(kind, name)

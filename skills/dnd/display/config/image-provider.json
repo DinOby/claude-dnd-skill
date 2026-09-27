@@ -13,8 +13,12 @@
       512
     ],
     "map": [
-      1024,
-      1024
+      512,
+      512
+    ],
+    "sprite": [
+      256,
+      256
     ]
   },
   "max_attempts": 3,
@@ -22,7 +26,8 @@
     "base": "Painted dark-fantasy game art, rich colours, soft rim light, clean composition, no text, no letters, no watermark",
     "item": "a single object centred on a plain dark background, three-quarter view, like an inventory icon",
     "token": "head-and-shoulders portrait inside a circular frame, facing the viewer, like a tabletop token",
-    "map": "top-down battle map seen from directly above, even lighting, no grid lines, no labels"
+    "map": "seamless tileable ground texture seen from directly above, even flat lighting, no objects, no furniture, no people, no shadows of objects, no grid lines, no border",
+    "sprite": "a single object seen from directly above (top-down), for a tabletop battle map, centred and filling most of the frame, on a flat solid pure magenta (#FF00FF) background, no shadow on the background, no magenta on the object"
   },
   "providers": {
     "gemini": {

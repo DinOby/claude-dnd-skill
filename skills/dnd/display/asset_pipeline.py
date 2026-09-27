@@ -25,7 +25,7 @@ from asset_queue import PendingQueue
 from asset_seed import SeedCatalog
 from asset_store import CATEGORIES, IMAGE_EXTS, KINDS, AssetStore, make_key, slugify
 from config_loader import ConfigFile, check_types
-from image_providers import MIME_EXT, ImageRequest, ProviderError, load_provider
+from image_providers import MIME_EXT, ImageRequest, ImageResult, ProviderError, load_provider
 
 
 def validate_provider_config(cfg: dict) -> "list[str]":
@@ -105,6 +105,48 @@ def postprocess(data: bytes, mime: str, width: int, height: int) -> "tuple[bytes
         return data, mime   # unreadable for Pillow → keep what the provider sent
 
 
+# Sprites (map objects) are generated in front of this colour and cut out.
+CHROMA_RGB = (255, 0, 255)
+
+
+def pillow_available() -> bool:
+    try:
+        import PIL  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def chroma_key(data: bytes) -> "tuple[bytes, str]":
+    """Make the magenta background transparent; returns (PNG bytes, "image/png").
+
+    "Magenta-ness" is min(R, B) − G: high on the key colour, low on real
+    colours (reds and blues have one of R/B low, greens have G high). Pixels
+    above the upper bound become transparent, those between the bounds fade
+    (antialiased edges), and on those edge pixels the magenta tint is pulled
+    out of R and B. Needs Pillow.
+    """
+    import io
+    from PIL import Image, ImageChops
+    lo, hi = 60, 150
+    with Image.open(io.BytesIO(data)) as src:
+        img = src.convert("RGB")
+    r, g, b = img.split()
+    mag = ImageChops.subtract(ImageChops.darker(r, b), g)
+    alpha = mag.point(lambda v: 0 if v >= hi else 255 if v <= lo else int(255 * (hi - v) / (hi - lo)))
+    edge = mag.point(lambda v: 255 if lo < v < hi else 0)
+    g_up = g.point(lambda v: min(255, v + 40))
+    r = Image.composite(ImageChops.darker(r, g_up), r, edge)
+    b = Image.composite(ImageChops.darker(b, g_up), b, edge)
+    out = Image.merge("RGBA", (r, g, b, alpha))
+    bbox = alpha.point(lambda v: 255 if v > 16 else 0).getbbox()
+    if bbox:   # trim empty margins so the object fills its squares
+        out = out.crop(bbox)
+    buf = io.BytesIO()
+    out.save(buf, "PNG", optimize=True)
+    return buf.getvalue(), "image/png"
+
+
 def _write_atomic(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".img.", suffix=".tmp")
@@ -116,9 +158,11 @@ def _write_atomic(path: str, data: bytes) -> None:
 class Pipeline:
     def __init__(self, store: AssetStore, queue: PendingQueue,
                  config: Optional[ConfigFile] = None,
-                 loader: Callable = load_provider):
+                 loader: Callable = load_provider,
+                 catalog: Optional[SeedCatalog] = None):
         self.store = store
         self.queue = queue
+        self.catalog = catalog
         self.config = config or provider_config()
         self._loader = loader
         self._providers: dict = {}
@@ -144,8 +188,14 @@ class Pipeline:
         return out
 
     # ── Generation ──
-    def _ready_provider(self, name: str, unavailable: "dict[str, str]", log: Callable[[str], None]):
+    def _ready_provider(self, name: str, unavailable: "dict[str, str]", log: Callable[[str], None],
+                        kind: str = "item"):
         """The provider if it can generate now; else None (remembered in `unavailable`)."""
+        if kind == "sprite" and not pillow_available():
+            if "sprite:pillow" not in unavailable:
+                unavailable["sprite:pillow"] = "Pillow missing"
+                log("! sprites need Pillow to cut out the background: pip install pillow")
+            return None
         if name in unavailable:
             return None
         try:
@@ -166,6 +216,12 @@ class Pipeline:
         result = prov.generate(ImageRequest(prompt=prompt, kind=kind, width=w, height=h))
         if not MIME_EXT.get(result.mime) or not result.data:
             raise ProviderError(f"unsupported image type {result.mime!r}")
+        if kind == "sprite":   # cut out here, so a bad image counts as this entry's failure
+            try:
+                data, mime = chroma_key(result.data)
+            except Exception as e:
+                raise ProviderError(f"could not cut out the background: {e}")
+            result = ImageResult(data=data, mime=mime, meta=result.meta)
         return result
 
     def _store_image(self, key: str, kind: str, result, size: "list[int]") -> str:
@@ -198,8 +254,11 @@ class Pipeline:
 
         summary = {"done": [], "failed": [], "planned": [], "blocked": []}
         unavailable: "dict[str, str]" = {}
+        seed_prompts = self._seed_prompts()
         for entry in entries:
             key, kind = entry["key"], entry.get("kind", "item")
+            if not entry.get("prompt") and not entry.get("hint") and key in seed_prompts:
+                entry = dict(entry, prompt=seed_prompts[key])
             if self._has_specific_image(key):
                 self.queue.update(key, status="done", last_error=None)
                 log(f"= {key}: already has an image")
@@ -209,7 +268,7 @@ class Pipeline:
             if dry_run:
                 summary["planned"].append({"key": key, "provider": name, "prompt": prompt})
                 continue
-            prov = self._ready_provider(name, unavailable, log)
+            prov = self._ready_provider(name, unavailable, log, kind)
             if prov is None:
                 summary["blocked"].append(key)
                 continue
@@ -236,6 +295,13 @@ class Pipeline:
             summary["done"].append(key)
             log(f"✓ {key} → {rel}")
         return summary
+
+    def _seed_prompts(self) -> "dict[str, str]":
+        """key → prompt of the seed catalogue (e.g. a wait-listed sprite:table)."""
+        try:
+            return {e["key"]: e["prompt"] for e in (self.catalog or SeedCatalog()).entries()}
+        except Exception:
+            return {}
 
     # ── Seeding (campaign-independent standard content) ──
     def seed(self, catalog: SeedCatalog, sets: Optional[Iterable[str]] = None,
@@ -275,7 +341,7 @@ class Pipeline:
             if dry_run:
                 summary["planned"].append({"key": key, "provider": name, "prompt": prompt})
                 continue
-            prov = self._ready_provider(name, unavailable, log)
+            prov = self._ready_provider(name, unavailable, log, kind)
             if prov is None:
                 summary["blocked"].append(key)
                 continue
