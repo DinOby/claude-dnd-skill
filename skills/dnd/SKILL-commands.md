@@ -518,6 +518,18 @@ Pull the latest skill changes from `origin/main`.
 
 ---
 
+## `/dm:dnd assets [status|generate|add|skip|retry]`
+Images for items (and later tokens/maps) — generated **between sessions, never during play**. Script syntax: `SKILL-scripts.md → Content Images`.
+- No argument / `status` → run `assets.py status` and `assets.py providers`; summarise counts, pending entries and whether the configured provider is ready.
+- `generate [N]`:
+  1. Run `assets.py status`. For each pending entry **without** a prompt, write a short visual description in **English** (image models follow English best): what the object/person looks like — material, colour, condition, one distinctive detail. Draw on the campaign files (`world.md`, `npcs.md`, the session log where it appeared) and the entry's `hint`. No names, no text in the image, no style words (the shared style is added automatically). Store it with `assets.py prompt KEY "…"`.
+  2. Run `assets.py generate --dry-run [--limit N]` and show the user how many images will be made and by which provider. If that provider costs money (anything but `dummy`), state the rough cost (Gemini ≈ $0.04 per image) and **ask before continuing**.
+  3. Run `assets.py generate [--limit N]` (long batches: run it in the background). Report done / failed / blocked. Blocked means the provider is not ready — relay its reason (usually a missing API key) instead of retrying.
+- `add <key> <file> [category]` → `assets.py add …` (the user's own picture).
+- `skip <key…>` / `retry [key…]` → pass through.
+
+---
+
 ## `/dm:dnd list`
 Read `~/.claude/dnd/campaigns/*/state.md`, print summary table: campaign name | last session date | session count.
 

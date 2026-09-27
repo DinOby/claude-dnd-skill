@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "active": {"default": "dummy"},
+  "sizes": {"item": [512, 512], "token": [512, 512], "map": [1024, 1024]},
+  "max_attempts": 3,
+  "style": {
+    "base": "Painted dark-fantasy game art, rich colours, soft rim light, clean composition, no text, no letters, no watermark",
+    "item": "a single object centred on a plain dark background, three-quarter view, like an inventory icon",
+    "token": "head-and-shoulders portrait inside a circular frame, facing the viewer, like a tabletop token",
+    "map": "top-down battle map seen from directly above, even lighting, no grid lines, no labels"
+  },
+  "providers": {
+    "dummy": {"module": "dummy", "size": 128}
+  }
+}

@@ -418,6 +418,26 @@ Likelihoods: `sure-thing`, `likely`, `50/50`, `unlikely`, `no-way`. Verdict suff
 
 ---
 
+## Content Images — `scripts/assets.py`
+
+Images for items (later also tokens and maps) are **never generated during play**. The display puts content without an image on a wait-list (`<data-root>/assets/pending-assets.json`); this script works through it afterwards. Image services are swappable in `display/config/image-provider.json` (override in `<data-root>/config/`). Keys are `item:<name>`, `token:<name>`, `map:<name>`, or a plain item name.
+
+```bash
+A="python3 ${CLAUDE_SKILL_DIR}/scripts/assets.py"
+$A status                                   # counts + pending entries
+$A providers                                # which image services are configured and ready
+$A prompt "item:Flammenschwert der Asche" "A longsword whose blade glows like banked embers"
+$A generate --dry-run                       # show final prompts, change nothing
+$A generate --limit 10                      # generate, update manifest, refresh the display
+$A add "item:Dolch" ~/Bilder/dolch.png --category weapon   # use your own image
+$A skip "Seil (50 ft)"                      # never generate this one
+$A retry                                    # failed entries back to pending
+```
+
+Categories: `weapon armor potion scroll ring wand wondrous tool gear pc npc enemy map`. Failed generations are retried up to `max_attempts` (default 3), then marked `failed`. A provider that is not ready (e.g. missing API key) blocks its entries without using up attempts.
+
+---
+
 ## Deterministic Graph Extraction — `scripts/graph_extract_deterministic.py`
 
 Zero-LLM relationship extractor. Pattern-matches session-log sentences against the bundled verb-table seed (`data/graph/verb_table_seed.yaml`) and emits typed edge proposals in the exact shape `campaign_graph.py` consumes. ~50% recall (clean subject-verb-object only), ~95% precision, no Claude API call. Usually driven through `campaign_graph.py extract --deterministic` rather than directly:

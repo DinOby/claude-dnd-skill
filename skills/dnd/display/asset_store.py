@@ -194,6 +194,11 @@ class AssetStore:
     def global_root(self) -> str:
         return self._manifests["global"].root
 
+    @property
+    def global_manifest(self) -> Manifest:
+        """Where generated and imported images are registered."""
+        return self._manifests["global"]
+
     def set_campaign_root(self, root: Optional[str]) -> None:
         with self._lock:
             self._manifests["campaign"] = Manifest(root) if root else None
