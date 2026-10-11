@@ -61,15 +61,55 @@ def _roll_directives():
     return ""
 
 
+def _collect_staged():
+    """Actions players typed in the party panel that are not in the queue file
+    yet (sent but not all players done, or never confirmed). The display hands
+    them over and clears them, so nothing typed is skipped at "next turn".
+    Empty list when the display is not running."""
+    import json
+    import ssl
+    import urllib.request
+    display_dir = os.path.dirname(os.path.abspath(__file__))
+    scheme_file = os.path.join(display_dir, ".scheme")
+    try:
+        scheme = open(scheme_file, encoding="utf-8").read().strip() if os.path.exists(scheme_file) else "http"
+        token = open(rt(".token"), encoding="utf-8").read().strip()
+    except OSError:
+        return []
+    ctx = None
+    if scheme == "https":
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(f"{scheme}://localhost:5001/player-input/collect", data=b"{}",
+                                 headers={"Content-Type": "application/json", "X-DND-Token": token},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "[]")
+    except Exception:
+        return []
+    return data if isinstance(data, list) else []
+
+
 try:
+    content = ""
     if os.path.exists(QUEUE_FILE):
         with open(QUEUE_FILE, encoding="utf-8") as f:
             content = f.read().strip()
         os.remove(QUEUE_FILE)
-        if content:
-            for d in (_roll_directives(), _narration_directive()):
-                if d:
-                    print(d)
-            print(content)
+    lines = [ln for ln in content.splitlines() if ln.strip()]
+    already = {ln.split("]:", 1)[0] for ln in lines}
+    for entry in _collect_staged():
+        name, text = str(entry.get("character", "")).strip(), str(entry.get("text", "")).strip()
+        if not name or not text or f"[{name}" in already:
+            continue
+        note = "" if entry.get("ready") else " (typed, not yet confirmed as final)"
+        lines.append(f"[{name}]: {text}{note}")
+    if lines:
+        for d in (_roll_directives(), _narration_directive()):
+            if d:
+                print(d)
+        print("\n".join(lines))
 except Exception:
     pass

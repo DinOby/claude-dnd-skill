@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -259,6 +260,55 @@ class TailLogicTest(unittest.TestCase):
         self.tail_file.write_text("{not json", encoding="utf-8")
         self._load()
         self.assertEqual(len(self._buffer), 1)
+
+    # ── Cross-campaign bleed ─────────────────────────────────────────────────
+
+    def test_persist_never_writes_another_campaigns_lines(self):
+        """After a campaign switch the buffer still holds the old campaign's
+        lines; they must not land in the new campaign's tail file."""
+        self._buffer.append({"text": "old docks scene", "_camp": "other-camp"})
+        self._buffer.append({"text": "new market scene", "_camp": "test-camp"})
+        self._persist()
+        on_disk = json.loads(self.tail_file.read_text(encoding="utf-8"))
+        self.assertEqual([e["text"] for e in on_disk], ["new market scene"])
+
+    def test_fresh_campaign_load_drops_other_campaigns_lines(self):
+        self._buffer.append({"text": "old docks scene", "_camp": "other-camp"})
+        self._buffer.append({"text": "unstamped", "player": "x"})
+        self.assertFalse(self.tail_file.exists())
+        self._load()
+        self.assertEqual([e["text"] for e in self._buffer], ["unstamped"])
+
+
+class OptionalStdinTest(unittest.TestCase):
+    """A body-optional send (award, stat-only) must not hang on a stdin pipe
+    that stays open without data — the agent shell hands exactly that."""
+
+    def setUp(self) -> None:
+        self.send = _load_module(DISPLAY / "send.py", "send_under_test_stdin")
+
+    def test_idle_open_pipe_returns_empty_quickly(self):
+        r, w = os.pipe()
+        orig = sys.stdin
+        try:
+            sys.stdin = os.fdopen(r, encoding="utf-8")
+            start = time.time()
+            self.assertEqual(self.send._read_optional_stdin(timeout=0.3), "")
+            self.assertLess(time.time() - start, 2.0)
+        finally:
+            sys.stdin = orig
+            os.close(w)
+
+    def test_piped_body_is_read(self):
+        r, w = os.pipe()
+        os.write(w, "Die Glocken schlagen.\n".encode("utf-8"))
+        os.close(w)
+        orig = sys.stdin
+        try:
+            sys.stdin = os.fdopen(r, encoding="utf-8")
+            self.assertEqual(self.send._read_optional_stdin(), "Die Glocken schlagen.\n")
+        finally:
+            sys.stdin = orig
 
 
 if __name__ == "__main__":

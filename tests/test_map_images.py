@@ -172,7 +172,7 @@ class MapImageRouteTests(IsolatedApp):
         self.assertEqual(queued["token:flerb"]["category"], "pc")
         self.assertIn("sprite:chair", queued)
         self.assertNotIn("token:goblin", queued)
-        self.assertNotIn("token:kiste", queued)          # objects never get portraits
+        self.assertEqual(queued["token:kiste"]["category"], "object")   # objects get an object image, not a portrait
         self.assertEqual(self.client.get("/map").get_json()["images"]["tokens"]["goblin"], imgs["tokens"]["goblin"])
 
     def test_patch_sends_images_of_added_tokens(self):

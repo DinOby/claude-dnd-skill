@@ -65,6 +65,17 @@ console.log(JSON.stringify({
   after_patch: [afterPatch.rev, afterPatch.tokens[1].x],
   after_clear: G.current(),
   notified: notified,
+  turn_entries: G._turnEntries({ order: ['Flerb', 'Goblin', 'Nobody'], current: 'Goblin', round: 2 },
+    [{ id: 'flerb', name: 'Flerb', kind: 'pc' }, { id: 'goblin', name: 'Goblin', kind: 'enemy', stats: { hp: { current: 3, max: 7 } } }],
+    [{ name: 'Flerb', hp: { current: 5, max: 12 } }]),
+  info: G._infoLines({ id: 'goblin', name: 'Goblin', kind: 'enemy',
+    stats: { hp: { current: 3, max: 7 }, ac: 15, attacks: ['Krummsäbel +4, 1W6+2'], notes: 'nervös' } }, []),
+  info_pc: G._infoLines({ id: 'flerb', name: 'Flerb', kind: 'pc' },
+    [{ name: 'Flerb', hp: { current: 5, max: 12 }, ac: 16, conditions: ['Poisoned'] }]),
+  tab_list: [G._tabList([{ id: 'markt', name: 'Markt' }], { id: 'steg', name: 'Steg' }),
+             G._tabList([{ id: 'markt', name: 'Markt' }], { id: 'markt', name: 'Markt' }),
+             G._tabList(null, null)],
+  update_patch: G._applyPatch(map, { map_id: 'kessel', base: 3, rev: 4, update: [{ id: 'goblin', stats: { ac: 15 } }] }).tokens[1].stats,
   grid: {
     auto_stationary_map: S._showGrid(stationary, true, 'auto'),
     auto_stationary_nomap: S._showGrid(stationary, false, 'auto'),
@@ -77,7 +88,7 @@ console.log(JSON.stringify({
   },
   banners: [S._bannerFor(travel), S._bannerFor(event), S._bannerFor(stationary), S._bannerFor(null),
             S._bannerFor({ mode: 'travel', travel: { to: 'X', day: 0, days_total: 3 } })],
-  sizes: [G._nextSize('normal'), G._nextSize('large'), G._nextSize('full'), G._nextSize('bogus')],
+  sizes: [G._nextSize('normal'), G._nextSize('large'), G._nextSize('full'), G._nextSize('side'), G._nextSize('bogus')],
   vfxHook: w.VfxOverlay.anchorFor === G.tokenCenter,
   anchorHidden: G.tokenCenter('Flerb'),
   found: ['Flerb', 'flerb', 'FLERB', 'Goblin 2', 'goblin-2', 'nobody', ''].map(r => {
@@ -113,11 +124,39 @@ class GridScriptTests(unittest.TestCase):
         self.assertEqual(self.out["registered"], ["vfx", "grid", "scene-mode"])   # page order: grid state before the rule
 
     def test_overlays_anchor_on_tokens(self):
-        self.assertEqual(self.out["sizes"], ["large", "full", "normal", "normal"])
+        self.assertEqual(self.out["sizes"], ["large", "full", "side", "normal", "normal"])
         self.assertTrue(self.out["vfxHook"])                 # grid.js wires VfxOverlay.anchorFor
         self.assertIsNone(self.out["anchorHidden"])          # grid not on screen → overlay stays centred
         self.assertEqual(self.out["found"], ["flerb", "flerb", "flerb", "goblin-2", "goblin-2", None, None])
         self.assertIsNone(self.out["hiddenNotFound"])        # the DM's hidden tokens never get an overlay
+
+    def test_turn_bar_entries(self):
+        e = self.out["turn_entries"]
+        self.assertEqual([x["name"] for x in e], ["Flerb", "Goblin", "Nobody"])
+        self.assertEqual(e[0]["hp"], {"current": 5, "max": 12})        # player stats win
+        self.assertEqual(e[1]["hp"], {"current": 3, "max": 7})         # token stat block
+        self.assertTrue(e[1]["current"])
+        self.assertEqual(e[2]["kind"], "enemy")
+        self.assertIsNone(e[2]["hp"])
+
+    def test_info_card_lines(self):
+        keys = [(l["k"], l["v"]) for l in self.out["info"]]
+        self.assertIn(("HP", "3 / 7"), keys)
+        self.assertIn(("AC", "15"), keys)
+        self.assertIn(("Attack", "Krummsäbel +4, 1W6+2"), keys)
+        self.assertIn(("Notes", "nervös"), keys)
+        pc = [(l["k"], l["v"]) for l in self.out["info_pc"]]
+        self.assertIn(("HP", "5 / 12"), pc)
+        self.assertIn(("Conditions", "Poisoned"), pc)
+
+    def test_tab_list_always_contains_the_live_map(self):
+        with_live, already, empty = self.out["tab_list"]
+        self.assertEqual([tb["id"] for tb in with_live], ["steg", "markt"])
+        self.assertEqual([tb["id"] for tb in already], ["markt"])
+        self.assertEqual(empty, [])
+
+    def test_patch_update_sets_stats(self):
+        self.assertEqual(self.out["update_patch"], {"ac": 15})
 
     def test_initials_and_labels(self):
         self.assertEqual(self.out["initials"], ["Fl", "WH", "G2", "G3", "Öl", "?", "AC"])

@@ -62,6 +62,25 @@ class Utf8ioTests(unittest.TestCase):
             read_text(p)
         self.assertIn(str(p), str(cm.exception))
 
+    def test_crlf_comes_back_as_lf(self):
+        p = self.dir / "state.md"
+        p.write_bytes("# Kampagne\r\n\r\n- Grosch\r\n".encode("utf-8"))
+        self.assertEqual(read_text(p), "# Kampagne\n\n- Grosch\n")
+
+    def test_damaged_cr_runs_collapse(self):
+        # "\r\r\n" is what a CRLF string written in text mode on Windows becomes.
+        p = self.dir / "state.md"
+        p.write_bytes(b"a\r\r\nb\rc\n")
+        self.assertEqual(read_text(p), "a\nb\nc\n")
+
+    def test_read_write_round_trip_is_stable(self):
+        # The bug: every read + text-mode write doubled the blank lines.
+        p = self.dir / "state.md"
+        p.write_bytes(b"line one\r\n\r\nline two\r\n")
+        for _ in range(3):
+            p.write_text(read_text(p), encoding="utf-8")
+        self.assertEqual(read_text(p), "line one\n\nline two\n")
+
 
 if __name__ == "__main__":
     unittest.main()

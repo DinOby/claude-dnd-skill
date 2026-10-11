@@ -36,7 +36,7 @@ PLACEHOLDER_DIR = os.path.join(_HERE, "assets", "placeholders")
 KINDS = ("item", "token", "map", "sprite")   # sprite: a map object (table, tree …), cut out
 ITEM_CATEGORIES = ("weapon", "armor", "potion", "scroll", "ring", "wand",
                    "wondrous", "tool", "gear")
-TOKEN_CATEGORIES = ("pc", "npc", "enemy")
+TOKEN_CATEGORIES = ("pc", "npc", "enemy", "object")   # object: a well, a door — no portrait
 CATEGORIES = ITEM_CATEGORIES + TOKEN_CATEGORIES + ("map", "sprite")
 DEFAULT_CATEGORY = {"item": "gear", "token": "npc", "map": "map", "sprite": "sprite"}
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg")

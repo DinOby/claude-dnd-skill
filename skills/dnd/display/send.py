@@ -68,6 +68,7 @@ import json
 import argparse
 import os
 import ssl
+import threading
 import time
 import urllib.request
 
@@ -381,6 +382,21 @@ def _build_stats_payload(args) -> "dict | None":
     return {"players": list(players.values())}
 
 
+def _read_optional_stdin(timeout: float = 1.0) -> str:
+    """Read stdin when a body is optional, without hanging on an open, idle pipe.
+
+    Agent shells often hand a non-TTY stdin that never reaches EOF, so a bare
+    award or stat-only call would block forever on read(). A heredoc or pipe
+    delivers its text at once; if nothing has finished arriving after
+    `timeout` seconds, treat the body as empty.
+    """
+    result: list = []
+    reader = threading.Thread(target=lambda: result.append(sys.stdin.read()), daemon=True)
+    reader.start()
+    reader.join(timeout)
+    return result[0] if result else ""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Send text to the DnD display server.")
     parser.add_argument(
@@ -405,6 +421,9 @@ def main() -> None:
     )
 
     # ── Inspiration / XP award flags ─────────────────────────────────────────
+    parser.add_argument("--private", metavar="NAME",
+                        help="Whisper the text from stdin to one character only (their phone or "
+                             "'Playing as' screen); nothing goes to the shared feed")
     parser.add_argument("--inspiration-award", metavar="NAME",
         help="Award Inspiration: fires a styled gold block in the feed + sidebar badge")
     parser.add_argument("--inspiration-reason", metavar="TEXT",
@@ -572,11 +591,32 @@ def main() -> None:
         if not _other:
             return
 
+    if args.private:
+        body_text = sys.stdin.read().strip()
+        if not body_text:
+            print("send.py: ABORT — --private needs the message on stdin.", file=sys.stderr)
+            sys.exit(1)
+        headers = {"Content-Type": "application/json", "X-DND-Token": _read_token()}
+        req = urllib.request.Request(BASE_URL + "/private", method="POST", headers=headers,
+                                     data=json.dumps({"to": args.private, "text": body_text}).encode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT, context=_SSL_CTX) as resp:
+                n = json.loads(resp.read() or b"{}").get("delivered", 0)
+        except Exception as e:
+            print(f"send.py: private message failed: {e}", file=sys.stderr)
+            sys.exit(1)
+        if not n:
+            print(f"send.py: {args.private} has no device connected ('Playing as' or phone) — "
+                  "the whisper was not delivered; tell them in private instead.", file=sys.stderr)
+            sys.exit(3)
+        print(f"send.py: whisper delivered to {args.private} ({n} device{'s' if n != 1 else ''})", file=sys.stderr)
+        return
+
     _has_content_flag = bool(args.player or args.npc or args.dice or args.tutor or args.action)
     if _has_content_flag:
         text = sys.stdin.read()
     else:
-        text = "" if sys.stdin.isatty() else sys.stdin.read()
+        text = "" if sys.stdin.isatty() else _read_optional_stdin()
     token = _read_token()
 
     # ── Inspiration award/spend ──────────────────────────────────────────────

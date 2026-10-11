@@ -93,6 +93,8 @@ Write narration as prose meant to be read at the table, never as a document. No 
 
 **Commit to specifics, not abstractions — especially in NPC dialogue and key reveals.** Names, dates, places, observable acts. *"Brother Aldon meets the courier at the Lantern Bridge midstone, three nights past the new moon, after evening watch"* lands; *"the rendezvous will be approached with care at the appropriate time"* drags. Vague, abstract, or exhaustive language reads as fluff and is the most common cause of session-drag, especially in mission briefings or NPC info-dumps. Reserve it only for in-fiction reasons — an NPC obscuring on purpose (mystery, deception), or one who genuinely does not know. Never default to abstraction because the concrete detail wasn't pre-planned: improvise the specific, then commit to it as canon. If you find yourself writing "somewhere", "at some point", "an act we have not identified", stop and pick something concrete instead.
 
+**Never give an NPC a name someone at the table carries.** Before naming a new NPC, check the players' real first names (state.md → Pinned Facts → *Spieler am Tisch* / *Players at the table*) and `name_registry.py check`. A player hearing their own name on a villain is confusing at best.
+
 ### 5. Make Every NPC Memorable
 Even a minor character gets one or two distinct traits: a verbal tic, a visible contradiction, a motivation that makes them a person rather than a prop. Players will latch onto throwaway characters and make them central — that's a feature, not a problem. When it happens, honour it: update `npcs.md`, develop the character further, let them become what the player has decided they are.
 
@@ -179,6 +181,12 @@ inside the plugin (so it survives updates/uninstalls):
 
 Resolve `~` to the user's home directory. Scripts locate both roots via
 `scripts/paths.py` (`skill_root()` for code, `DND_CAMPAIGN_ROOT` for data).
+
+**`<DATA root>` in these instructions** means that data root — never assume
+`~/.claude/dnd`, the user may have moved it. In shell commands write it as
+`"${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}"` (quoted, exactly like that), e.g.
+`mkdir -p "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>/characters"`.
+`python3 ${CLAUDE_SKILL_DIR}/scripts/path_config.py` prints the resolved paths.
 
 ---
 
@@ -301,6 +309,8 @@ Roll handling is chosen at game start and stored as `roll_mode` in `state.md →
 **Initiative** is always DM-rolled via `combat.py init` for all combatants (PCs and NPCs) regardless of `roll_mode`.
 
 **Per-player override:** a player can flip their own PC via the phone Settings → *Rolls* toggle. When that player has a queued action, `check_input.py` prepends a `[[<Char> roll mode: auto|players]]` directive — honor it for that character, overriding the campaign default. Precedence: **per-character directive > campaign `roll_mode`**.
+
+**Remote players ("Playing as"):** a player who sets *Settings → Playing as* on their own display gets your `--dice-request` for their character as a roll dialog on their screen; the roll resolves the request and also arrives in `check_input.py`. With such a table, prefer `send.py --dice-request --character "<PC>" …` (no `--wait` needed — the result comes with the next turn) over asking for numbers in prose.
 
 **NPC/monster rolls are always yours** — resolve via `dice.py`, show math inline:
   `Goblin attacks: d20+4 = 17 vs AC 16 — hit! 1d6+2 = 5 piercing damage`
@@ -428,7 +438,11 @@ Where the party is lives in the scene state (`travel.py status`): `stationary` a
 - **Travel event** (printed by `day`, or forced with `travel.py event` when the story calls for it): the event map appears with the party and the creatures. Use the printed hint and Mythic focus as a starting point, not a script — an event can be talked through, avoided or fought. When it is resolved: `travel.py event-end` (the event map is discarded), then continue with `day`.
 - **A travel day includes the night's camp.** Apply long-rest recovery as usual but skip the calendar step of `/dm:dnd rest long` — `travel.py day` already advanced the clock.
 - **Tokens follow the narration.** When the narration moves someone meaningfully, bundle `--stat-move "NAME:POS"` into that turn's `push_stats.py` call; add arrivals with `--token-add`, remove the dead, fled or departed with `--token-remove`. Positions are column letter + row (`D5`, `A1` = top-left). Use the **same names as the initiative order** (`Goblin 1`, `Goblin 2`) so the turn marker and moves match. A refused move prints why (off the grid, unknown name) — fix and resend, don't narrate around it. Mention squares in the narration only when it helps the players decide (ranges, cover, who is adjacent).
-- **Tokens without a picture** show initials and go on the image wait-list automatically; generate them between sessions (`/dm:dnd assets`).
+- **Tokens without a picture** show initials and go on the image wait-list automatically; generate them between sessions (`/dm:dnd assets`). Map objects (`kind: object` — a well, a door) get an object picture, never a portrait.
+- **Every place change gets its map in the same call.** A scene the players move into should never be narrated over the previous place's map. Returning to a place brings its stored map back by itself; a new place needs `--map-new`.
+- **Check the board against the narration after every scene.** Before writing the next turn, compare the tokens with what was just narrated: who left (remove), who arrived (add), who moved (move), nobody standing on a door or a well, no twins. Place tokens deliberately — look at the template's walls and zones first — instead of guessing squares.
+- **Fights:** give every opponent a stat block when combat starts (`--token-add '{…,"stats":{"hp":"11/11","ac":12,"attacks":[…]}}'`) and update hit points with `--token-hp` as damage lands; players see them by clicking the token, and the initiative bar above the map shows the HP bars.
+- **Split party:** show each group's place once; the map tabs let players look at either while you narrate. Use whispers (`send.py --private`) for anything only one character should learn.
 
 ---
 

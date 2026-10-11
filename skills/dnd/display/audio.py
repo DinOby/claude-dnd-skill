@@ -98,6 +98,85 @@ def get_sfx_wav(name: str) -> Optional[bytes]:
     return _wav_cache[key]
 
 
+def get_combat_music_wav() -> Optional[bytes]:
+    """A seamless combat loop (8 bars, 112 bpm), synthesised once and cached.
+
+    Used when the table has not put its own track at <data-root>/audio/combat.*.
+    """
+    if not _HAS_NUMPY:
+        return None
+    if "music_combat" not in _wav_cache:
+        _wav_cache["music_combat"] = _to_wav_bytes(_synth_combat_loop(), vol=0.5)
+    return _wav_cache["music_combat"]
+
+
+def _synth_combat_loop() -> "np.ndarray":
+    """War drums over a low drone in D minor; the second half leans on B-flat.
+
+    Built on an exact grid of beats so the end meets the start: the browser
+    loops it without a gap or a click.
+    """
+    bpm = 112
+    beat = int(round(SR * 60.0 / bpm))
+    bars, per_bar = 8, 4
+    n = beat * per_bar * bars
+    out = np.zeros(n)
+    rng = np.random.default_rng(7)   # fixed seed: the same loop every time
+
+    def place(sig: "np.ndarray", at: int, gain: float) -> None:
+        end = min(n, at + len(sig))
+        out[at:end] += sig[: end - at] * gain
+
+    # Kick: a falling sine with a fast decay.
+    kn = int(SR * 0.45)
+    kt = np.arange(kn) / SR
+    kick = np.sin(2 * np.pi * (48 + 50 * np.exp(-kt * 22)) * kt) * np.exp(-kt * 9)
+    # Taiko-style tom: lower, rounder, with a little skin noise.
+    tn = int(SR * 0.6)
+    tt = np.arange(tn) / SR
+    tom = (np.sin(2 * np.pi * 82 * tt) * 0.8 + _fft_lp(rng.uniform(-1, 1, tn), 900) * 0.25) * np.exp(-tt * 6)
+    # Snare-ish crack: band-passed noise.
+    sn = int(SR * 0.22)
+    st = np.arange(sn) / SR
+    snare = _fft_bp(rng.uniform(-1, 1, sn), 900, 5200) * np.exp(-st * 18)
+
+    eighth = beat // 2
+    for bar in range(bars):
+        b0 = bar * per_bar * beat
+        for i in range(per_bar):
+            place(kick, b0 + i * beat, 0.9 if i in (0, 2) else 0.45)
+        for i in (1, 3):
+            place(snare, b0 + i * beat, 0.35)
+        # syncopated toms; the last bar of each half rolls into the next
+        pattern = (0, 3, 4, 6) if bar % 4 != 3 else (0, 2, 3, 4, 5, 6, 7)
+        for k in pattern:
+            place(tom, b0 + k * eighth, 0.55 if k % 2 == 0 else 0.4)
+
+    # Drone: root + fifth, slow swell; D for bars 1-4, B-flat for 5-8.
+    half = n // 2
+    t = np.arange(n) / SR
+    root = np.where(np.arange(n) < half, 73.42, 58.27)
+    fifth = root * 1.5
+    phase_root = 2 * np.pi * np.cumsum(root) / SR
+    phase_fifth = 2 * np.pi * np.cumsum(fifth) / SR
+    drone = (np.sin(phase_root) + 0.5 * np.sin(2 * phase_root) + 0.45 * np.sin(phase_fifth))
+    swell = 0.55 + 0.45 * np.sin(2 * np.pi * t / (n / SR) * 2 - np.pi / 2)
+    out += _fft_lp(drone, 700) * swell * 0.22
+
+    # Staccato low ostinato on eighths: the drive under the drums.
+    on = int(eighth * 0.55)
+    for k in range(n // eighth):
+        f = 146.83 if (k // 16) % 2 == 0 else 116.54
+        if k % 8 in (3, 7):
+            f *= 1.19   # minor third up for movement
+        seg_t = np.arange(on) / SR
+        note = (np.sign(np.sin(2 * np.pi * f * seg_t)) * 0.4 + np.sin(2 * np.pi * f * seg_t)) * np.exp(-seg_t * 14)
+        place(note, k * eighth, 0.12)
+
+    peak = np.max(np.abs(out)) or 1.0
+    return out / peak * 0.95
+
+
 def _to_wav_bytes(mono: "np.ndarray", vol: float = 0.42) -> bytes:
     """Convert a float64 mono numpy array to WAV bytes (16-bit PCM, mono)."""
     clipped = np.clip(mono * vol, -1.0, 1.0)

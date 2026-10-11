@@ -215,8 +215,14 @@ def cmd_advance(campaign: str, amount: int, unit: str) -> None:
         print("Calendar not initialised. Run `calendar.py -c <campaign> init` first.")
         sys.exit(1)
 
-    hours = {"hour": 1, "hours": 1, "day": 24, "days": 24, "week": 168, "weeks": 168}.get(unit, 1)
-    total_hours = amount * hours
+    if unit in ("minute", "minutes"):
+        # The calendar keeps whole hours; minutes accumulate until they make one,
+        # so several short scenes (a brief talk, a quick search) still move the clock.
+        minutes = cal.get("minute", 0) + amount
+        total_hours, cal["minute"] = divmod(minutes, 60)
+    else:
+        hours = {"hour": 1, "hours": 1, "day": 24, "days": 24, "week": 168, "weeks": 168}.get(unit, 1)
+        total_hours = amount * hours
     _advance_hours(cal, total_hours)
     _save(campaign, cal)
 
@@ -327,7 +333,7 @@ def main() -> None:
     adv = sub.add_parser("advance", help="Advance time by amount")
     adv.add_argument("amount", type=int)
     adv.add_argument("unit",
-                     choices=["hour","hours","day","days","week","weeks"])
+                     choices=["minute","minutes","hour","hours","day","days","week","weeks"])
 
     rst = sub.add_parser("rest", help="Advance time for a short or long rest")
     rst.add_argument("type", choices=["short","long"])

@@ -216,20 +216,29 @@ def _extract_names_from_character(path: str) -> list[tuple[str, str]]:
         for nm in re.findall(r'"([^"]+)"', m.group(1)):
             entries.append((nm, "spell"))
 
-    # Features section
+    # Features section — the bold name at the start of each bullet
+    # ("- **Rage (Kampfrausch)** — ..."). "###" headings are class/species
+    # group titles ("### Barbar", "### Ork Racial"), not features.
     feat_section = re.search(r"## Features.*?\n(.*?)(?=\n## |\Z)", content, re.S | re.I)
     if feat_section:
-        for m in re.finditer(r"###\s+(.+)|^\*\*([^*]+)\*\*", feat_section.group(1), re.M):
-            name = (m.group(1) or m.group(2) or "").strip()
-            if name and len(name) > 2 and not name.startswith("*"):
+        for m in re.finditer(r"^\s*(?:[-*•]\s+)?\*\*([^*]+)\*\*", feat_section.group(1), re.M):
+            name = m.group(1).strip().rstrip(":").strip()
+            if name and len(name) > 2:
                 entries.append((name, "feature"))
 
-    # Attacks — check attack names for lookups
+    # Attacks — only the first cell of each data row is a name; the other cells
+    # are bonuses, dice, damage types ("Hieb", "Stich") and notes.
     attack_section = re.search(r"## Attacks.*?\n(.*?)(?=\n## |\Z)", content, re.S | re.I)
     if attack_section:
-        for m in re.finditer(r"\|\s*([A-Z][A-Za-z '\-/]+)\s*\|", attack_section.group(1)):
-            name = m.group(1).strip()
-            if name not in ("Name", "Attack") and len(name) > 2:
+        rows = [ln for ln in attack_section.group(1).splitlines() if ln.strip().startswith("|")]
+        for i, row in enumerate(rows):
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            if not cells or set(cells[0]) <= set("-: "):
+                continue                      # separator row
+            if i + 1 < len(rows) and set(rows[i + 1].replace("|", "").strip()) <= set("-: "):
+                continue                      # header row (followed by the separator)
+            name = re.sub(r"\*+", "", cells[0]).strip()
+            if len(name) > 2:
                 entries.append((name, "spell"))   # may be a spell/cantrip attack
 
     # Deduplicate while preserving order
@@ -241,6 +250,26 @@ def _extract_names_from_character(path: str) -> list[tuple[str, str]]:
             seen.add(key)
             unique.append((name, cat))
     return unique
+
+
+def _name_variants(name: str) -> list[str]:
+    """Both halves of "German (English)" / "English (German)" plus the whole name."""
+    # Drop a leading label such as "Origin Feat: Savage Attacker".
+    name = re.sub(r"^[A-Za-z][A-Za-z ]*:\s*", "", name).strip()
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*$", name)
+    if not m:
+        return [name]
+    return [m.group(1).strip(), m.group(2).strip()]
+
+
+def _fetch_name(name: str) -> str | None:
+    """The variant worth looking up on wikidot: ASCII only (an English rules
+    name). German-only names have no wikidot page and are skipped, never
+    stubbed — a stub for "Hieb" or "Kurzbogen" only pollutes the dataset."""
+    for v in _name_variants(name):
+        if v and re.fullmatch(r"[A-Za-z0-9 '\-/]+", v):
+            return v
+    return None
 
 
 # ─── Fetch and build entry ────────────────────────────────────────────────────
@@ -276,8 +305,8 @@ def _build_entry(name: str, category: str) -> dict | None:
             time.sleep(FETCH_DELAY)
 
     if not text:
-        print(f"  [miss] No content found for '{name}' — adding stub with wikidot link only")
-        text = f"See full description at {WIKIDOT_BASE}/{path}"
+        print(f"  [miss] No content found for '{name}' — skipped (no stub written)")
+        return None
 
     cat_key = "spells" if category == "spell" else "features"
     entry: dict = {
@@ -351,11 +380,20 @@ def main() -> None:
         else:
             print(f"  [skip] '{name}' found in SRD")
 
+    def _consider(name: str, cat: str) -> None:
+        variants = _name_variants(name)
+        if any(_norm(v) in srd_names or _in_supplemental(supp, v) for v in variants):
+            return
+        fetch = _fetch_name(name)
+        if fetch is None:
+            print(f"  [skip] '{name}' — no English rules name to look up")
+            return
+        to_fetch.append((fetch, cat))
+
     # Collect from --character
     if args.character:
         for name, cat in _extract_names_from_character(os.path.expanduser(args.character)):
-            if _norm(name) not in srd_names and not _in_supplemental(supp, name):
-                to_fetch.append((name, cat))
+            _consider(name, cat)
 
     # Collect from --campaign
     if args.campaign:
@@ -368,8 +406,7 @@ def main() -> None:
                 char_path = os.path.join(camp_dir, fname)
                 print(f"Scanning {fname}...")
                 for name, cat in _extract_names_from_character(char_path):
-                    if _norm(name) not in srd_names and not _in_supplemental(supp, name):
-                        to_fetch.append((name, cat))
+                    _consider(name, cat)
 
     # Deduplicate
     seen: set[str] = set()

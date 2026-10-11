@@ -253,6 +253,27 @@ Templates (`display/map-templates/`, own ones or replacements in `<data-root>/ma
 
 **Scene:** `--scene-set "Zum grünen Kessel"` = the party is now at this place without a journey; the previous map is cleared, so add the new one in the same call (`--scene-set "…" --map-new tavern-small --map-id zum-gruenen-kessel`). A map shown while stationary becomes the scene's map. During plain travel map commands are refused (exit 1) — journeys go through `scripts/travel.py`.
 
+**Scene memory:** `--scene-set "Schimmelsteg (Tropfviertel)"` brings back the stored map of that place by itself (map id = slug of the place, with or without the bracketed district, or a map whose name equals the place). A place seen for the first time still needs `--map-new`.
+
+**Map tabs:** every map shown with `--map-new` / `--map-show` becomes a tab (the last 4; travel-event maps never). When the party splits, show the second place's map once — players can then switch between both in the tab bar while the DM stays on the live one. `--map-tab-close ID` removes a tab.
+
+**Token stat blocks (players click a token to see them):**
+```bash
+PS="python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py"
+$PS --token-add '{"name":"Goblin 1","kind":"enemy","stats":{"hp":"7/7","ac":15,"attacks":["Krummsäbel +4, 1W6+2"]}}'
+$PS --token-stats 'Goblin 1:{"conditions":["liegend"],"notes":"flieht bei 2 TP"}'   # merge; null removes a key
+$PS --token-hp "Goblin 1:3:7"            # after damage (bundle with the turn's other moves)
+```
+Keys: `hp ac cr speed attacks conditions notes`. Player characters show their sidebar stats automatically. Only put on a token what the characters could know or see (no hidden HP of a mystery foe unless you want it revealed). Re-adding a **named** person or object already on the map (`--token-add "Mutter Gerlinde:F3"`) moves it instead of creating a twin; enemies (`Goblin`) may still come in multiples.
+
+**Logbook:** the players' log is `<campaign>/logbuch.md` — what the characters know, sorted by quest (`## Quest` sections, `- [ ]` open questions, a people/places table). Players open it with the 📜 button in the sidebar. After each scene with new information: update the file, then `$PS --logbook-updated` (marks the button "new").
+
+**Campaign items:** `<campaign>/items.md` — `## Name` + a paragraph per item only this campaign has (a debt ledger, a guild badge). Clicking that inventory line on the display shows it. German inventory names of SRD gear (`4 Handäxte`, `Einbrecherpaket`) resolve on their own (`display/config/item-aliases.json`).
+
+**Whispers (secret channel):** `send.py --private "Zarith" << 'DNDEND' … DNDEND` delivers only to that character's devices (phone or "Playing as" screen) — never the shared feed. Exit 3 = nobody connected as that character. Players send secret actions with the 🤫 button; they arrive in `check_input.py` as `[Name] (SECRET …): text` — answer them with `--private`, never in the shared narration.
+
+**Combat music:** plays on every display while an initiative order is set (`--turn-order` … `--turn-clear`) — nothing to send. The table's own track at `<data-root>/audio/combat.mp3` (or .ogg/.m4a/.wav) replaces the built-in loop.
+
 **Player input queue — `display/check_input.py`:**
 ```bash
 # Called at the start of each turn BEFORE processing the player's message.
@@ -260,6 +281,8 @@ Templates (`display/map-templates/`, own ones or replacements in `<data-root>/ma
 # Output: "[Max of Thraxx]: I draw my rapier" — empty if nothing queued. Clears the display indicator.
 python3 ${CLAUDE_SKILL_DIR}/display/check_input.py
 ```
+
+It also collects every action a player **sent but that is not in the queue yet** (others still typing, or held back), marked `(typed, not yet confirmed as final)`, and every roll players made on their own screens (`[Grosch]: rolled 1d20+3 (Wahrnehmung) = 18 [15] +3`) — so "next turn" never skips what the table already typed.
 
 If `check_input.py` returns output, prepend it to the player's terminal input when forming the turn:
 - Only queued input: treat as the full player action this turn
@@ -292,7 +315,7 @@ If `check_input.py` returns output, prepend it to the player's terminal input wh
 ---
 
 ## Tracker Script — `scripts/tracker.py`
-Tracks conditions, concentration, timed effects, and death saves. State persists at `~/.claude/dnd/campaigns/<name>/tracker.json`.
+Tracks conditions, concentration, timed effects, and death saves. State persists at `<DATA root>/campaigns/<name>/tracker.json`.
 
 ```bash
 CAMP=my-campaign
@@ -342,6 +365,7 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/calendar.py -c $CAMP init \
     --day-names "Sunday,Moonday,Ironday,Windday,Earthday,Fireday,Starday"
 
 # Time advancement
+python3 ${CLAUDE_SKILL_DIR}/scripts/calendar.py -c $CAMP advance 30 minutes   # minutes add up to hours
 python3 ${CLAUDE_SKILL_DIR}/scripts/calendar.py -c $CAMP advance 8 hours
 python3 ${CLAUDE_SKILL_DIR}/scripts/calendar.py -c $CAMP advance 2 days
 python3 ${CLAUDE_SKILL_DIR}/scripts/calendar.py -c $CAMP rest short   # +1 hour

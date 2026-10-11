@@ -24,9 +24,10 @@ if [[ -z "$CAMP" ]]; then
   exit 2
 fi
 
-# Resolve the campaign root the same way the Python side does.
-# DND_CAMPAIGN_ROOT env var > default ~/.claude/dnd/campaigns
-ROOT="${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd/campaigns}"
+# Resolve the campaigns dir the same way scripts/paths.py does:
+# DND_CAMPAIGN_ROOT is the DATA root (default ~/.claude/dnd); campaigns live in
+# its campaigns/ subdirectory.
+ROOT="${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns"
 TAIL="$ROOT/$CAMP/session_tail.json"
 
 if [[ ! -f "$TAIL" ]]; then

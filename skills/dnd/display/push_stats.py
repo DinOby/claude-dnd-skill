@@ -203,6 +203,30 @@ def _token_spec(spec: str) -> dict:
     return tok
 
 
+def _stats_spec(spec: str) -> dict:
+    """'Lampenträger 2:{"hp":"11/11","ac":12}' → {"id": NAME, "stats": {...}}."""
+    name, sep, raw = spec.strip().partition(":{")
+    if not sep or not name.strip():
+        raise ValueError(f"expected NAME:{{JSON}}, got {spec!r}")
+    return {"id": name.strip(), "stats": json.loads("{" + raw)}
+
+
+def _hp_spec(spec: str) -> dict:
+    """'Lampenträger 2:4:11' or 'Lampenträger 2:4' → hp update."""
+    parts = spec.strip().split(":")
+    if len(parts) == 3:
+        name, cur, mx = parts
+        hp = f"{cur.strip()}/{mx.strip()}"
+    elif len(parts) == 2:
+        name, cur = parts
+        hp = cur.strip()
+    else:
+        raise ValueError(f"expected NAME:CUR[:MAX], got {spec!r}")
+    if not name.strip():
+        raise ValueError(f"expected NAME:CUR[:MAX], got {spec!r}")
+    return {"id": name.strip(), "stats": {"hp": hp}}
+
+
 def _move_spec(spec: str) -> dict:
     """'Flerb:D5' → {"id": "Flerb", "to": "D5"} (the server matches names too)."""
     name, _, pos = spec.strip().rpartition(":")
@@ -243,12 +267,18 @@ def _map_body(args) -> "tuple[list[dict], Optional[str]]":
             patch["add"] = [_token_spec(s) for s in args.token_add]
         if args.token_remove:
             patch["remove"] = [s.strip() for s in args.token_remove]
+        updates = [_stats_spec(s) for s in (getattr(args, "token_stats", None) or [])]
+        updates += [_hp_spec(s) for s in (getattr(args, "token_hp", None) or [])]
+        if updates:
+            patch["update"] = updates
         if args.token_party:
             patch["add_party"] = True
         if patch:
             bodies.append({"patch": patch})
         if args.map_hide:
             bodies.append({"hide": True})
+        for tab in getattr(args, "map_tab_close", None) or []:
+            bodies.append({"close_tab": tab.strip()})
     except (ValueError, OSError) as e:
         return [], str(e)
     return bodies, None
@@ -349,6 +379,17 @@ def main() -> None:
                         help='Add a token, e.g. "Goblin 2:E7:enemy" or "Goblin:enemy" (spawn zone), or JSON (repeatable)')
     parser.add_argument("--token-remove", metavar="NAME", action="append",
                         help="Remove a token by name or id (repeatable)")
+    parser.add_argument("--token-stats", metavar="NAME:JSON", action="append",
+                        help="Set the stat block players see when they click a token, e.g. "
+                             """'Goblin 1:{"hp":"7/7","ac":15,"attacks":["Krummsäbel +4, 1W6+2"]}' """
+                             "(keys: hp ac cr speed attacks conditions notes; null removes a key; repeatable)")
+    parser.add_argument("--map-tab-close", metavar="ID", action="append",
+                        help="Remove a map from the tabs viewers can switch between (repeatable); "
+                             "every map shown with --map-new/--map-show becomes a tab (last 4)")
+    parser.add_argument("--logbook-updated", action="store_true",
+                        help="Tell open displays that <campaign>/logbuch.md changed (shows a 'new' marker)")
+    parser.add_argument("--token-hp", metavar="NAME:CUR[:MAX]", action="append",
+                        help='Update a token\'s hit points, e.g. "Goblin 1:3:7" (repeatable)')
     args = parser.parse_args()
 
     # ── Battle map (own endpoint; may be combined with stat flags) ────────────
@@ -526,6 +567,12 @@ def main() -> None:
     # ── Clear display ─────────────────────────────────────────────────────────
     if args.clear:
         _send(FLASK_URL.replace("/stats", "/clear"), b"", _read_token())
+        if not payload and not map_bodies and not args.logbook_updated:
+            return
+
+    # ── Logbook changed (the DM rewrote <campaign>/logbuch.md) ────────────────
+    if args.logbook_updated:
+        _send(FLASK_URL.replace("/stats", "/logbook/notify"), b"{}", _read_token())
         if not payload and not map_bodies:
             return
 

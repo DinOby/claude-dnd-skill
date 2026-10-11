@@ -242,6 +242,18 @@ class SceneRouteTests(IsolatedApp):
             msgs.append(self.main.get_nowait())
         self.assertIn("scene_state", msgs[-1])
 
+    def test_returning_to_a_place_brings_its_map_back(self):
+        self.post("/map", {"map": {"template": "bridge", "id": "schimmelsteg", "name": "Der Schimmelsteg"}})
+        self.post("/scene", {"action": "scene-set", "location": "Zur Tropfrinne"})
+        self.assertIsNone(self.app._maps.current())                         # no map stored for this place
+        # by id (bracketed district dropped) …
+        self.post("/scene", {"action": "scene-set", "location": "Schimmelsteg (Tropfviertel)"})
+        self.assertEqual(self.app._maps.current()["id"], "schimmelsteg")
+        self.post("/scene", {"action": "scene-set", "location": "Zur Tropfrinne"})
+        # … and by the map's display name
+        self.post("/scene", {"action": "scene-set", "location": "Der Schimmelsteg"})
+        self.assertEqual(self.app._maps.current()["id"], "schimmelsteg")
+
     def test_route_errors(self):
         code, data = self.post("/scene", {"action": "event-end"})
         self.assertEqual(code, 409)

@@ -176,6 +176,57 @@ def _norm_terrain(raw, cols: int, rows: int, problems: "list[str]") -> "list[dic
     return out
 
 
+TOKEN_STAT_KEYS = ("hp", "ac", "cr", "speed", "attacks", "conditions", "notes")
+
+
+def clean_token_stats(raw, where: str, problems: "list[str]", partial: bool = False) -> dict:
+    """Validate the optional stat block a token carries (shown when someone clicks it).
+
+    {"hp": "4/11" | [4, 11] | {"current": 4, "max": 11}, "ac": 12, "cr": "1/8",
+     "speed": "9 m", "attacks": ["Knüppel +3, 1W6+1"], "conditions": ["vergiftet"],
+     "notes": "..."} — hp is stored as {"current", "max"}. With partial=True
+    (an update), a null value removes that key.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        problems.append(f"{where}: stats should be a JSON object")
+        return {}
+    out: dict = {}
+    for key, val in raw.items():
+        if key not in TOKEN_STAT_KEYS:
+            problems.append(f"{where}: unknown stat '{key}' (use {', '.join(TOKEN_STAT_KEYS)})")
+            continue
+        if val is None:
+            if partial:
+                out[key] = None
+            continue
+        if key == "hp":
+            cur = mx = None
+            if isinstance(val, str) and "/" in val:
+                a, _, b = val.partition("/")
+                cur, mx = a.strip(), b.strip()
+            elif isinstance(val, (list, tuple)) and len(val) == 2:
+                cur, mx = val
+            elif isinstance(val, dict):
+                cur, mx = val.get("current"), val.get("max")
+            elif _is_int(val) or (isinstance(val, str) and val.strip().lstrip("-").isdigit()):
+                cur = val
+            try:
+                cur = int(cur)
+                mx = int(mx) if mx is not None else None
+            except (TypeError, ValueError):
+                problems.append(f"{where}: hp should look like \"4/11\"")
+                continue
+            out["hp"] = {"current": cur, "max": mx}
+        elif key in ("attacks", "conditions"):
+            items = val if isinstance(val, list) else [val]
+            out[key] = [str(i).strip() for i in items if str(i).strip()][:12]
+        else:
+            out[key] = str(val).strip()[:300] if not _is_int(val) else val
+    return out
+
+
 def _norm_token(raw, cols: int, rows: int, taken: "set[str]", where: str,
                 problems: "list[str]", allow_unplaced: bool = False) -> Optional[dict]:
     if isinstance(raw, str):
@@ -217,6 +268,9 @@ def _norm_token(raw, cols: int, rows: int, taken: "set[str]", where: str,
             tok[field] = raw[field].strip()
     if raw.get("hidden") is True:
         tok["hidden"] = True
+    stats = clean_token_stats(raw.get("stats"), f"{where} ({name})", problems)
+    if stats:
+        tok["stats"] = stats
     if tok["x"] is not None:
         _check_rect({"x": tok["x"], "y": tok["y"], "w": size, "h": size}, cols, rows,
                     f"{where} ({name})", problems)
@@ -400,7 +454,8 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
 
     Returns (new_map, applied_patch, warnings); `applied_patch` is what the
     browser needs: {"map_id", "base", "rev", "move": [{id,x,y}], "add": [token],
-    "remove": [id]}. Raises MapError listing every problem; nothing applies then.
+    "remove": [id], "update": [{id, stats}]}. Raises MapError listing every problem;
+    nothing applies then.
     """
     if not isinstance(patch, dict):
         raise MapError(["a map patch should be a JSON object"])
@@ -408,7 +463,7 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
     if patch.get("map_id") not in (None, m["id"]):
         raise MapError([f"patch is for map '{patch.get('map_id')}', but '{m['id']}' is on screen"])
     new = copy.deepcopy(m)
-    applied = {"map_id": m["id"], "base": m["rev"], "move": [], "add": [], "remove": []}
+    applied = {"map_id": m["id"], "base": m["rev"], "move": [], "add": [], "remove": [], "update": []}
     touched: "list[dict]" = []
 
     for i, ref in enumerate(_as_list(patch.get("remove"), "remove", problems)):
@@ -438,8 +493,50 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
         applied["move"].append({"id": tok["id"], "x": pos[0], "y": pos[1]})
         touched.append(tok)
 
+    for i, up in enumerate(_as_list(patch.get("update"), "update", problems)):
+        ref = (up.get("id") or up.get("name")) if isinstance(up, dict) else None
+        tok = find_token(new, ref) if ref else None
+        if tok is None:
+            problems.append(f"update[{i}]: no token '{ref}' on the map")
+            continue
+        changes = clean_token_stats(up.get("stats"), f"update[{i}] ({tok['name']})", problems, partial=True)
+        merged = dict(tok.get("stats") or {})
+        for key, val in changes.items():
+            if val is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = val
+        if merged:
+            tok["stats"] = merged
+        else:
+            tok.pop("stats", None)
+        applied.setdefault("update", [])
+        applied["update"] = [a for a in applied["update"] if a["id"] != tok["id"]]
+        applied["update"].append({"id": tok["id"], "stats": merged})
+
     taken = {t["id"] for t in new["tokens"]}
+    redirected: "list[str]" = []
     for i, raw in enumerate(_as_list(patch.get("add"), "add", problems)):
+        # A named person or object is unique: adding one that is already on the
+        # map moves it (when a square is given) instead of creating a twin.
+        # Creatures (enemies) may still come in multiples: "Goblin" twice is two goblins.
+        spec = {"name": raw} if isinstance(raw, str) else raw
+        if isinstance(spec, dict) and spec.get("kind", "npc") in ("pc", "npc", "object") \
+                and isinstance(spec.get("name"), str) and not spec.get("id"):
+            existing = next((t for t in new["tokens"]
+                             if t["name"].casefold() == spec["name"].strip().casefold()), None)
+            if existing is not None:
+                if any(k in spec for k in ("at", "to", "x", "y")):
+                    pos = _position(spec, f"add[{i}] ({existing['name']})", problems)
+                    if pos is not None:
+                        existing["x"], existing["y"] = pos
+                        applied["move"] = [a for a in applied["move"] if a["id"] != existing["id"]]
+                        applied["move"].append({"id": existing["id"], "x": pos[0], "y": pos[1]})
+                        touched.append(existing)
+                        redirected.append(f"{existing['name']} was already on the map — moved instead of added")
+                else:
+                    redirected.append(f"{existing['name']} is already on the map — not added again")
+                continue
         tok = _norm_token(raw, new["cols"], new["rows"], taken, f"add[{i}]", problems, allow_unplaced=True)
         if tok:
             new["tokens"].append(tok)
@@ -450,11 +547,14 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
 
     if problems:
         raise MapError(problems)
-    if not (applied["move"] or applied["add"] or applied["remove"]):
-        raise MapError(["the patch changes nothing (use move, add or remove)"])
+    if not (applied["move"] or applied["add"] or applied["remove"] or applied.get("update")):
+        if redirected:
+            # Only re-adds of tokens already standing where they are: nothing to do.
+            return m, {"map_id": m["id"], "base": m["rev"], "rev": m["rev"]}, redirected
+        raise MapError(["the patch changes nothing (use move, add, remove or update)"])
     new["rev"] = m["rev"] + 1
     applied["rev"] = new["rev"]
-    warnings = []
+    warnings = list(redirected)
     before = {t["name"].casefold() for t in new["tokens"] if t not in applied["add"]}
     for tok in applied["add"]:   # several goblins are normal, a second innkeeper is not
         if tok["kind"] in ("pc", "npc") and tok["name"].casefold() in before:
@@ -695,6 +795,7 @@ class MapStore:
             m["rev"] = (old["rev"] + 1) if old else max(m["rev"], 1)
             self._save(m, layout=True)
             self._current = m
+            self._remember(m)
             return copy.deepcopy(m)
 
     def show(self, map_id: str) -> dict:
@@ -705,7 +806,44 @@ class MapStore:
                 raise MapError([f"no map '{slug(map_id)}' in the library"])
             _write_json(self._active_path(), {"map_id": m["id"]})
             self._current = m
+            self._remember(m)
             return copy.deepcopy(m)
+
+    # ── tabs: the maps shown most recently, for viewers to switch between ──
+    MAX_TABS = 4
+
+    def _tabs_path(self) -> str:
+        return os.path.join(self.placement_dir, "tabs.json")
+
+    def _tab_ids(self) -> "list[str]":
+        ids = (_read_json(self._tabs_path()) or {}).get("tabs")
+        return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+
+    def _remember(self, m: dict) -> None:
+        """Put a shown map at the front of the tabs (event maps are never tabs)."""
+        if m.get("temporary"):
+            return
+        ids = [m["id"]] + [i for i in self._tab_ids() if i != m["id"]]
+        _write_json(self._tabs_path(), {"tabs": ids[: self.MAX_TABS]})
+
+    def tabs(self) -> "list[dict]":
+        """[{"id", "name"}] most recent first; maps whose layout is gone are skipped."""
+        out = []
+        for map_id in self._tab_ids():
+            m = self.load(map_id)
+            if m is not None and not m.get("temporary"):
+                out.append({"id": m["id"], "name": m.get("name") or m["id"]})
+        return out
+
+    def close_tab(self, map_id: str) -> "list[dict]":
+        with self._lock:
+            ids = [i for i in self._tab_ids() if i != slug(map_id)]
+            _write_json(self._tabs_path(), {"tabs": ids})
+        return self.tabs()
+
+    def peek(self, map_id: str) -> Optional[dict]:
+        """A stored map with this campaign's tokens, without putting it on screen."""
+        return self.load(map_id)
 
     def patch(self, patch: dict) -> "tuple[dict, list[str]]":
         """Apply a patch to the map on screen; returns (applied_patch, warnings)."""

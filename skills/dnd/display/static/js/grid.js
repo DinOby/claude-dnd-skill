@@ -30,8 +30,8 @@
 
   const MOVE_MS = 450;
   const SIZE_KEY = 'dnd-map-size';
-  const SIZES = ['normal', 'large', 'full'];
-  const SIZE_LABELS = { normal: 'Normal', large: 'Large', full: 'Full' };
+  const SIZES = ['normal', 'large', 'full', 'side'];
+  const SIZE_LABELS = { normal: 'Normal', large: 'Large', full: 'Full', side: 'Side' };
   // Sprites stretched over their whole rectangle; every other type is tiled per square.
   const STRETCH = ['table', 'chair', 'bar', 'fireplace', 'door', 'well', 'log', 'stall', 'tent', 'wagon',
                    'fire', 'stairs', 'bridge', 'rug', 'bed', 'altar', 'chest', 'statue', 'shrine'];
@@ -39,9 +39,19 @@
   let map = null;
   let images = { floor: null, terrain: {}, tokens: {} };
   let turn = null;                 // name of the combatant whose turn it is
+  let turnOrder = null;            // stats.turn_order — drives the bar above the map
+  let players = [];                // stats.players — hit points for the bar and the info card
   let size = 'normal';             // "Map Size" setting, per browser
   let visible = false;
-  let panel = null, board = null, title = null;
+  let panel = null, board = null, title = null, turnbar = null, infoCard = null, tabbar = null;
+  // `map`/`images` are what this screen shows. Usually that is the live map the
+  // DM has on screen; a viewer may switch to another tab (a map shown recently,
+  // e.g. where a split-off part of the party stands) — then the live map waits
+  // in liveMap/liveImages and comes back with "Live".
+  let liveMap = null;
+  let liveImages = { floor: null, terrain: {}, tokens: {} };
+  let previewId = null;
+  let tabs = [];                   // [{id, name}] from the server, most recent first
   const tokenEls = new Map();      // token id → element
   let resyncing = false;
   const listeners = [];
@@ -82,8 +92,67 @@
       tok.x = mv.x; tok.y = mv.y;
     }
     for (const tok of patch.add || []) next.tokens.push(tok);
+    for (const up of patch.update || []) {
+      const tok = next.tokens.find(t => t.id === up.id);
+      if (!tok) return null;
+      if (up.stats && Object.keys(up.stats).length) tok.stats = up.stats;
+      else delete tok.stats;
+    }
     next.rev = patch.rev;
     return next;
+  }
+
+  /* Hit points as {current, max} for a name: a player's sidebar stats first,
+     else the token's own stat block. null when unknown. */
+  function hpFor(name, tok, playerList) {
+    const low = String(name || '').toLowerCase();
+    const p = (playerList || []).find(pl => String(pl.name || '').toLowerCase() === low);
+    if (p && p.hp && p.hp.current != null) return { current: p.hp.current, max: p.hp.max };
+    if (tok && tok.stats && tok.stats.hp) return tok.stats.hp;
+    return null;
+  }
+
+  /* One chip per combatant in initiative order, for the bar above the map. */
+  function turnEntries(order, tokens, playerList) {
+    if (!order || !Array.isArray(order.order)) return [];
+    const current = String(order.current || '').toLowerCase();
+    return order.order.map(name => {
+      const tok = findToken(tokens, name);
+      const isPlayer = (playerList || []).some(pl => String(pl.name || '').toLowerCase() === String(name).toLowerCase());
+      return {
+        name: String(name),
+        id: tok ? tok.id : turnId(name),
+        kind: tok ? tok.kind : (isPlayer ? 'pc' : 'enemy'),
+        hp: hpFor(name, tok, playerList),
+        current: String(name).toLowerCase() === current,
+      };
+    });
+  }
+
+  /* Text lines for the info card of a token (pure: tested in node). */
+  function infoLines(tok, playerList) {
+    if (!tok) return [];
+    const KIND = { pc: 'Player character', npc: 'Non-player character', enemy: 'Opponent', object: 'Object' };
+    const lines = [{ k: 'kind', v: KIND[tok.kind] || tok.kind }];
+    const low = String(tok.name).toLowerCase();
+    const p = (playerList || []).find(pl => String(pl.name || '').toLowerCase() === low);
+    const st = tok.stats || {};
+    const hp = hpFor(tok.name, tok, playerList);
+    if (hp) lines.push({ k: 'HP', v: hp.max != null ? hp.current + ' / ' + hp.max : String(hp.current) });
+    const ac = p && p.ac != null ? p.ac : st.ac;
+    if (ac != null && ac !== '') lines.push({ k: 'AC', v: String(ac) });
+    if (st.cr) lines.push({ k: 'CR', v: String(st.cr) });
+    if (st.speed) lines.push({ k: 'Speed', v: String(st.speed) });
+    const conds = (p && Array.isArray(p.conditions) && p.conditions.length) ? p.conditions : (st.conditions || []);
+    if (conds.length) lines.push({ k: 'Conditions', v: conds.join(', ') });
+    for (const a of st.attacks || []) lines.push({ k: 'Attack', v: String(a) });
+    if (p && p.sheet && Array.isArray(p.sheet.attacks)) {
+      for (const a of p.sheet.attacks.slice(0, 4)) {
+        lines.push({ k: 'Attack', v: [a.name, a.bonus, a.damage].filter(Boolean).join(' ') });
+      }
+    }
+    if (st.notes) lines.push({ k: 'Notes', v: String(st.notes) });
+    return lines;
   }
 
   /* "Goblin 2" → "goblin-2": the id grid_map.py derives from a name (umlauts as ae/oe/ue/ss). */
@@ -158,12 +227,24 @@
     panel.setAttribute('aria-label', 'Battle map');
     title = document.createElement('div');
     title.className = 'grid-title';
+    turnbar = document.createElement('div');
+    turnbar.className = 'grid-turnbar';
+    turnbar.setAttribute('aria-label', 'Initiative order');
     board = document.createElement('div');
     board.className = 'grid-board';
+    tabbar = document.createElement('div');
+    tabbar.className = 'grid-tabs';
+    tabbar.setAttribute('role', 'tablist');
+    panel.appendChild(tabbar);
     panel.appendChild(title);
+    panel.appendChild(turnbar);
     panel.appendChild(board);
     document.body.appendChild(panel);
-    window.addEventListener('resize', () => render());
+    window.addEventListener('resize', () => { hideInfo(); render(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') hideInfo(); });
+    document.addEventListener('click', e => {
+      if (infoCard && !infoCard.contains(e.target) && !(e.target.closest && e.target.closest('.grid-token'))) hideInfo();
+    });
     // follow the text column when the sidebar or settings column is toggled
     const scroll = document.getElementById('text-scroll');
     if (scroll && typeof MutationObserver !== 'undefined') {
@@ -176,6 +257,16 @@
   function placePanel() {
     const scroll = document.getElementById('text-scroll');
     if (!panel || !scroll) return;
+    if (size === 'side') {
+      // Map between the character sidebar and the narration column.
+      const sidebar = document.getElementById('sidebar');
+      const sbRect = sidebar && !scroll.classList.contains('sidebar-hidden') ? sidebar.getBoundingClientRect() : null;
+      const left = sbRect && sbRect.width ? Math.round(sbRect.right + 16) : 60;
+      const right = Math.max(0, Math.round(window.innerWidth - scroll.getBoundingClientRect().left + 14));
+      panel.style.left = left + 'px';
+      panel.style.right = right + 'px';
+      return;
+    }
     const cs = getComputedStyle(scroll);
     panel.style.left = cs.paddingLeft;
     panel.style.right = cs.paddingRight;
@@ -192,11 +283,96 @@
     return 'grid-t grid-t-' + String(type).toLowerCase().replace(/[^a-z0-9-]/g, '');
   }
 
+  function renderTurnbar() {
+    const entries = turnEntries(turnOrder, map ? map.tokens : [], players);
+    turnbar.textContent = '';
+    turnbar.hidden = !entries.length;
+    if (turnOrder && turnOrder.round != null && entries.length) {
+      turnbar.appendChild(el('span', 'grid-turn-round', 'Round ' + turnOrder.round));
+    }
+    for (const e of entries) {
+      const chip = el('div', 'grid-turn-chip grid-kind-' + e.kind + (e.current ? ' is-current' : ''));
+      const disc = el('div', 'grid-token-disc');
+      const portrait = images.tokens[e.id];
+      if (portrait) {
+        chip.classList.add('has-img');
+        disc.style.backgroundImage = 'url("' + String(portrait).replace(/"/g, '%22') + '")';
+      } else {
+        disc.textContent = initials(e.name);
+      }
+      chip.appendChild(disc);
+      const body = el('div', 'grid-turn-body');
+      body.appendChild(el('div', 'grid-turn-name', e.name));
+      if (e.hp && e.hp.max) {
+        const bar = el('div', 'grid-turn-hp');
+        const fill = el('div', 'grid-turn-hp-fill');
+        const pct = Math.max(0, Math.min(100, Math.round(100 * e.hp.current / e.hp.max)));
+        fill.style.width = pct + '%';
+        fill.classList.toggle('low', pct <= 33);
+        bar.appendChild(fill);
+        bar.title = e.hp.current + ' / ' + e.hp.max + ' HP';
+        body.appendChild(bar);
+      }
+      chip.appendChild(body);
+      chip.title = e.name + (e.hp ? ' — ' + e.hp.current + (e.hp.max ? ' / ' + e.hp.max : '') + ' HP' : '');
+      turnbar.appendChild(chip);
+    }
+  }
+
+  function showInfo(tok, anchor) {
+    if (!tok) return;
+    if (!infoCard) {
+      infoCard = el('div', 'grid-info');
+      infoCard.setAttribute('role', 'dialog');
+      document.body.appendChild(infoCard);
+    }
+    infoCard.textContent = '';
+    const head = el('div', 'grid-info-head');
+    const disc = el('div', 'grid-token-disc');
+    const portrait = images.tokens[tok.id];
+    if (portrait) disc.style.backgroundImage = 'url("' + String(portrait).replace(/"/g, '%22') + '")';
+    else disc.textContent = initials(tok.name);
+    head.appendChild(disc);
+    head.appendChild(el('div', 'grid-info-name', tok.name));
+    const close = el('button', 'grid-info-close', '✕');
+    close.type = 'button';
+    close.addEventListener('click', hideInfo);
+    head.appendChild(close);
+    infoCard.className = 'grid-info grid-kind-' + (tok.kind || 'npc') + (portrait ? ' has-img' : '');
+    infoCard.appendChild(head);
+    const list = el('dl', 'grid-info-list');
+    const lines = infoLines(tok, players);
+    for (const line of lines) {
+      list.appendChild(el('dt', null, line.k === 'kind' ? '' : line.k));
+      list.appendChild(el('dd', line.k === 'kind' ? 'grid-info-kind' : null, line.v));
+    }
+    if (lines.length <= 1) list.appendChild(el('dd', 'grid-info-empty', 'No stats revealed yet.'));
+    infoCard.appendChild(list);
+    infoCard.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const w = infoCard.offsetWidth || 260, h = infoCard.offsetHeight || 160;
+    let left = r.right + 10, top = r.top - 8;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, r.left - w - 10);
+    if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
+    infoCard.style.left = left + 'px';
+    infoCard.style.top = top + 'px';
+    infoCard.dataset.id = tok.id;
+  }
+
+  function hideInfo() {
+    if (infoCard) { infoCard.hidden = true; delete infoCard.dataset.id; }
+  }
+
   function render() {
     if (!panel || !map || !document.body.classList.contains('grid-on')) return;
     placePanel();
-    title.textContent = map.name || map.id;
-    const cell = cellSize(map.cols, map.rows, panel.clientWidth - 8, panel.clientHeight - title.offsetHeight - 8);
+    renderTabbar();
+    title.textContent = (map.name || map.id)
+      + (previewId && liveMap ? ' — viewing; the DM is on ' + (liveMap.name || liveMap.id) : '');
+    title.classList.toggle('grid-title-preview', !!previewId);
+    renderTurnbar();
+    const barH = (turnbar.hidden ? 0 : turnbar.offsetHeight + 6) + (tabbar.hidden ? 0 : tabbar.offsetHeight + 6);
+    const cell = cellSize(map.cols, map.rows, panel.clientWidth - 8, panel.clientHeight - title.offsetHeight - barH - 8);
     if (!cell) return;
     const gutter = Math.round(cell * 0.8);
     board.style.setProperty('--cell', cell + 'px');
@@ -251,6 +427,13 @@
         tEl = el('div', 'grid-token entering');
         tEl.appendChild(el('div', 'grid-token-disc'));
         tEl.appendChild(el('div', 'grid-token-name'));
+        const tokId = tok.id;
+        tEl.addEventListener('click', ev => {
+          ev.stopPropagation();
+          const current = map && (map.tokens || []).find(t => t.id === tokId);
+          if (infoCard && !infoCard.hidden && infoCard.dataset.id === tokId) hideInfo();
+          else showInfo(current, tEl);
+        });
         field.appendChild(tEl);
         tokenEls.set(tok.id, tEl);
         requestAnimationFrame(() => tEl.classList.remove('entering'));
@@ -292,17 +475,28 @@
     }
   }
 
-  function setMap(next, nextImages) {
+  /* Put a map on this screen (the live one or a tab preview). */
+  function showMap(next, nextImages) {
     const sameMap = map && next && map.id === next.id;
     map = next || null;
     if (nextImages !== undefined) images = mergeImages({ floor: null, terrain: {}, tokens: {} }, nextImages || {});
     if (!map) images = { floor: null, terrain: {}, tokens: {} };
     if (typeof document === 'undefined') { notify(); return; }
-    if (!map) { clearBoard(); notify(); return; }
+    if (!map) { clearBoard(); renderTabbar(); notify(); return; }
     ensurePanel();
     if (!sameMap) clearBoard();
     render();
     notify();
+  }
+
+  /* The DM's map changed: keep it as the live map; show it unless this viewer looks at another tab. */
+  function setMap(next, nextImages) {
+    liveMap = next || null;
+    if (nextImages !== undefined) liveImages = mergeImages({ floor: null, terrain: {}, tokens: {} }, nextImages || {});
+    if (!liveMap) liveImages = { floor: null, terrain: {}, tokens: {} };
+    if (previewId && (!liveMap || liveMap.id === previewId)) previewId = null;   // the DM came to us
+    if (!previewId) showMap(liveMap, liveImages);
+    else renderTabbar();
   }
 
   function resync() {
@@ -310,24 +504,90 @@
     resyncing = true;
     fetch('/map', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
-      .then(data => { if (data) setMap(data.map, data.images || {}); })
+      .then(data => {
+        if (!data) return;
+        if (Array.isArray(data.tabs)) tabs = data.tabs;
+        setMap(data.map, data.images || {});
+      })
       .catch(() => {})
       .finally(() => { resyncing = false; });
   }
 
   function onPatch(patch, extra) {
-    const next = applyPatch(map, patch);
+    const next = applyPatch(liveMap, patch);
     if (!next) { resync(); return; }
-    images = mergeImages(images, extra ? { tokens: extra.tokens || {} } : null);
-    setMap(next);
+    liveImages = mergeImages(liveImages, extra ? { tokens: extra.tokens || {} } : null);
+    liveMap = next;
+    if (!previewId) showMap(liveMap, liveImages);
+  }
+
+  // ── Tabs ─────────────────────────────────────────────────────────────────
+
+  function viewTab(id) {
+    if (!id || (liveMap && id === liveMap.id)) { backToLive(); return; }
+    if (typeof fetch === 'undefined') return;
+    fetch('/map?id=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!data || !data.map) return;
+        previewId = data.map.id;
+        hideInfo();
+        showMap(data.map, data.images || {});
+      })
+      .catch(() => {});
+  }
+
+  function backToLive() {
+    previewId = null;
+    hideInfo();
+    showMap(liveMap, liveImages);
+  }
+
+  /* Tabs to show: the server's list plus the live map if missing. Pure: tested in node. */
+  function tabList(serverTabs, live) {
+    const list = (serverTabs || []).slice();
+    if (live && !list.some(tb => tb.id === live.id)) list.unshift({ id: live.id, name: live.name || live.id });
+    return list;
+  }
+
+  function renderTabbar() {
+    if (!tabbar) return;
+    const list = tabList(tabs, liveMap);
+    tabbar.textContent = '';
+    tabbar.hidden = list.length < 2 && !previewId;
+    if (tabbar.hidden) return;
+    for (const tb of list) {
+      const isLive = !!liveMap && tb.id === liveMap.id;
+      const active = previewId ? tb.id === previewId : isLive;
+      const b = el('button', 'grid-tab' + (active ? ' active' : '') + (isLive ? ' is-live' : ''), tb.name);
+      b.type = 'button';
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+      b.title = isLive ? 'The map the DM has on screen' : 'Look at this map (the DM stays on the live one)';
+      b.addEventListener('click', () => viewTab(tb.id));
+      tabbar.appendChild(b);
+    }
+    if (previewId) {
+      const live = el('button', 'grid-tab grid-tab-back', '● Live');
+      live.type = 'button';
+      live.title = 'Back to the map the DM has on screen';
+      live.addEventListener('click', backToLive);
+      tabbar.appendChild(live);
+    }
   }
 
   function onTurn(stats) {
     const to = stats && stats.turn_order;
     const current = to && to.current ? String(to.current).toLowerCase() : null;
-    if (current === turn) return;
+    const before = JSON.stringify([turnOrder, players]);
+    if (stats && 'turn_order' in stats) {
+      // Partial pushes (only "current"/"round") merge into the known order.
+      turnOrder = to && !to.order && turnOrder ? Object.assign({}, turnOrder, to) : (to || null);
+    }
+    if (stats && Array.isArray(stats.players)) players = stats.players;
+    const changed = current !== turn || JSON.stringify([turnOrder, players]) !== before;
     turn = current;
-    if (map && typeof document !== 'undefined') render();
+    if (changed && map && typeof document !== 'undefined') render();
   }
 
   function setVisible(on) {
@@ -380,6 +640,12 @@
     _mergeImages: mergeImages,
     _images: () => images,
     _turn: () => turn,
+    _turnEntries: turnEntries,
+    _tabList: tabList,
+    _live: () => liveMap,
+    _previewId: () => previewId,
+    _infoLines: infoLines,
+    _hpFor: hpFor,
   };
   window.GridView = api;
 
@@ -395,11 +661,12 @@
 
   if (window.DisplayModules) {
     DisplayModules.register('grid', payload => {
+      if (Array.isArray(payload.map_tabs)) { tabs = payload.map_tabs; renderTabbar(); }
       if ('map' in payload) setMap(payload.map, payload.map_images || {});
       if (payload.map_patch) onPatch(payload.map_patch, payload.map_images);
       if (payload.stats) onTurn(payload.stats);
       if (payload.assets_changed && map) resync();
-      if (payload.clear) setMap(null);
+      if (payload.clear) { previewId = null; tabs = []; setMap(null); }
     }, { displayOnly: true });
   }
 })();

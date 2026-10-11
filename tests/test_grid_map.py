@@ -182,6 +182,26 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(self.store.current())
         self.assertIsNone(gm.MapStore(str(self.lib), str(self.camp_a)).current())
 
+    def test_shown_maps_become_tabs_most_recent_first(self):
+        for i in range(5):
+            self.store.set_map(tavern(id=f"ort-{i}", name=f"Ort {i}"))
+        self.store.show("ort-1")
+        self.assertEqual([tb["id"] for tb in self.store.tabs()], ["ort-1", "ort-4", "ort-3", "ort-2"])  # max 4
+        self.assertEqual(self.store.tabs()[0]["name"], "Ort 1")
+
+    def test_event_maps_are_never_tabs_and_tabs_can_close(self):
+        self.store.set_map(tavern(id="markt"))
+        self.store.set_map(tavern(id="ereignis"), temporary=True)
+        self.assertEqual([tb["id"] for tb in self.store.tabs()], ["markt"])
+        self.assertEqual(self.store.close_tab("markt"), [])
+
+    def test_peek_does_not_change_the_screen(self):
+        self.store.set_map(tavern(id="markt"))
+        self.store.set_map(tavern(id="steg"))
+        peeked = self.store.peek("markt")
+        self.assertEqual(peeked["id"], "markt")
+        self.assertEqual(self.store.current()["id"], "steg")
+
 
 class TemplateTests(unittest.TestCase):
     def setUp(self):
@@ -260,8 +280,48 @@ class PlacementTests(unittest.TestCase):
         new, applied, _ = gm.apply_patch(m, {"add": [{"name": "Goblin", "kind": "enemy"}]})
         self.assertEqual((applied["add"][0]["id"], gm.format_coord(applied["add"][0]["x"], applied["add"][0]["y"])),
                          ("goblin-2", "K7"))
-        _, _, warnings = gm.apply_patch(new, {"add": [{"name": "Wirtin Hilde"}, {"name": "wirtin hilde"}]})
-        self.assertEqual(warnings, ["wirtin hilde was already on the map — added another one as 'wirtin-hilde-2'"])
+        # A named person is unique: the second add is dropped, not a twin.
+        twin, _, warnings = gm.apply_patch(new, {"add": [{"name": "Wirtin Hilde"}, {"name": "wirtin hilde"}]})
+        self.assertEqual(warnings, ["Wirtin Hilde is already on the map — not added again"])
+        self.assertEqual(sum(t["name"].casefold() == "wirtin hilde" for t in twin["tokens"]), 1)
+
+    def test_re_adding_a_named_token_with_a_square_moves_it(self):
+        m = self.build(tokens=[{"name": "Mutter Gerlinde", "kind": "npc", "at": "B2"}])
+        new, applied, warnings = gm.apply_patch(m, {"add": [{"name": "Mutter Gerlinde", "kind": "npc", "at": "F3"}]})
+        self.assertEqual(len(new["tokens"]), 1)
+        self.assertEqual(gm.format_coord(new["tokens"][0]["x"], new["tokens"][0]["y"]), "F3")
+        self.assertEqual(applied["move"], [{"id": "mutter-gerlinde", "x": 5, "y": 2}])
+        self.assertIn("Mutter Gerlinde was already on the map — moved instead of added", warnings)
+
+    def test_re_adding_a_named_token_without_a_square_changes_nothing(self):
+        m = self.build(tokens=[{"name": "Mutter Gerlinde", "kind": "npc", "at": "B2"}])
+        new, applied, warnings = gm.apply_patch(m, {"add": [{"name": "Mutter Gerlinde"}]})
+        self.assertIs(new, m)
+        self.assertEqual(applied["rev"], m["rev"])
+        self.assertEqual(warnings, ["Mutter Gerlinde is already on the map — not added again"])
+
+    def test_token_stats_are_kept_and_normalised(self):
+        m = self.build(tokens=[{"name": "Goblin 1", "kind": "enemy", "at": "J7",
+                                "stats": {"hp": "7/7", "ac": 15, "attacks": "Krummsäbel +4"}}])
+        st = m["tokens"][0]["stats"]
+        self.assertEqual(st["hp"], {"current": 7, "max": 7})
+        self.assertEqual(st["ac"], 15)
+        self.assertEqual(st["attacks"], ["Krummsäbel +4"])
+
+    def test_unknown_stat_is_refused(self):
+        with self.assertRaises(gm.MapError) as cm:
+            self.build(tokens=[{"name": "Goblin", "kind": "enemy", "stats": {"mana": 3}}])
+        self.assertIn("unknown stat 'mana'", " | ".join(cm.exception.problems))
+
+    def test_update_merges_stats_and_null_removes(self):
+        m = self.build(tokens=[{"name": "Goblin 1", "kind": "enemy", "at": "J7",
+                                "stats": {"hp": "7/7", "ac": 15, "notes": "nervös"}}])
+        new, applied, _ = gm.apply_patch(m, {"update": [{"id": "Goblin 1",
+                                                          "stats": {"hp": [3, 7], "notes": None}}]})
+        st = new["tokens"][0]["stats"]
+        self.assertEqual(st, {"hp": {"current": 3, "max": 7}, "ac": 15})
+        self.assertEqual(applied["update"], [{"id": "goblin-1", "stats": st}])
+        self.assertEqual(new["rev"], m["rev"] + 1)
 
     def test_bad_spawn(self):
         with self.assertRaises(gm.MapError) as cm:
@@ -396,6 +456,10 @@ class PushStatsFlagTests(unittest.TestCase):
         self.assertEqual(self.ps._token_spec("Goblin:enemy"), {"name": "Goblin", "kind": "enemy"})
         self.assertEqual(self.ps._token_spec("Wirtin Hilde"), {"name": "Wirtin Hilde", "kind": "npc"})
         self.assertEqual(self.ps._token_spec("Flerb::pc"), {"name": "Flerb", "kind": "pc"})
+        self.assertEqual(self.ps._stats_spec('Goblin 1:{"hp":"7/7","ac":15}'),
+                         {"id": "Goblin 1", "stats": {"hp": "7/7", "ac": 15}})
+        self.assertEqual(self.ps._hp_spec("Goblin 1:3:7"), {"id": "Goblin 1", "stats": {"hp": "3/7"}})
+        self.assertEqual(self.ps._hp_spec("Goblin 1:3"), {"id": "Goblin 1", "stats": {"hp": "3"}})
         for bad in ("Flerb", ":D5"):
             with self.assertRaises(ValueError):
                 self.ps._move_spec(bad)

@@ -108,5 +108,34 @@ class CliWiringTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
+class CharacterLookupTests(unittest.TestCase):
+    """The display name and the file slug must find the same sheet, and the
+    display must always get the sheet's own name back — a slug pushed to the
+    sidebar showed up as a second player card."""
+
+    def setUp(self):
+        self._d = tempfile.TemporaryDirectory()
+        self.base = pathlib.Path(self._d.name)
+        self._orig = xp.CAMPAIGNS_DIR
+        xp.CAMPAIGNS_DIR = self.base
+        chars = self.base / "c" / "characters"
+        chars.mkdir(parents=True)
+        self.sheet = chars / "grosch-zahnbrecher.md"
+        self.sheet.write_text("# Grosch Zahnbrecher\n**XP:** 0 / 300\n", encoding="utf-8")
+
+    def tearDown(self):
+        xp.CAMPAIGNS_DIR = self._orig
+        self._d.cleanup()
+
+    def test_display_name_finds_the_slugged_file(self):
+        self.assertEqual(xp._find_char_path("c", "Grosch Zahnbrecher"), self.sheet)
+
+    def test_slug_still_finds_the_file(self):
+        self.assertEqual(xp._find_char_path("c", "grosch-zahnbrecher"), self.sheet)
+
+    def test_sheet_title_is_the_display_name(self):
+        self.assertEqual(xp._sheet_title(self.sheet), "Grosch Zahnbrecher")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,7 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 2. **Ruleset selection (added 2026-05-08).** Ask: *"D&D 5e ruleset for this campaign? **2014** (SRD 5.1, default — full mechanics, classic Player's Handbook structure) or **2024** (SRD 5.2, weapon mastery + origin feats + background ASIs + revised exhaustion)?"* Default to `2014` if no answer or ambiguous. Write the chosen value to `state.md` header line as `**Ruleset:** 2014` or `**Ruleset:** 2024`.
 
    If 2024 was chosen: verify the dataset exists with `ls ${CLAUDE_SKILL_DIR}/data/dnd5e_srd_2024.json`. If missing, run `python3 ${CLAUDE_SKILL_DIR}/scripts/build_srd.py --ruleset 2024` (one-time, ~3 min). Until the dataset exists, lookup-based features will fall back to 2014.
-3. `mkdir -p ~/.claude/dnd/campaigns/<name>/characters`
+3. `mkdir -p "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>/characters"`
 4. Copy and populate templates from `${CLAUDE_SKILL_DIR}/templates/` — state.md, world.md, npcs.md, session-log.md. The state.md header keeps the `**Ruleset:**` field set in step 2.
 5. Ask: **party size** and **starting level**
 6. **Tone/Genre Wizard** — present all four in one message:
@@ -67,7 +67,7 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 ---
 
 ## `/dm:dnd load <campaign-name>`
-0. **Pick the campaign if none was named.** If `<campaign-name>` was supplied (or the player clearly named one), use it. Otherwise `ls` the campaigns dir (`~/.claude/dnd/campaigns/` or `$DND_CAMPAIGN_ROOT/campaigns/`) and **call `AskUserQuestion`**: *"Which campaign?"* with the existing campaign names as options (most-recently-played first — sort by `state.md` mtime). The player can pick "Other" to type a name. If there are no campaigns, tell them and offer `/dm:dnd new`.
+0. **Pick the campaign if none was named.** If `<campaign-name>` was supplied (or the player clearly named one), use it. Otherwise `ls` the campaigns dir (`<DATA root>/campaigns/`) and **call `AskUserQuestion`**: *"Which campaign?"* with the existing campaign names as options (most-recently-played first — sort by `state.md` mtime). The player can pick "Other" to type a name. If there are no campaigns, tell them and offer `/dm:dnd new`.
 1. **Session setup — call `AskUserQuestion`** with **two questions** (not typed y/n prompts):
 
    **Q1 *"Display & input mode?"***
@@ -81,7 +81,7 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
    - `DM rolls everything openly` → write `roll_mode: auto`. Resolve PC rolls yourself with full math shown.
 
    - (Defaults if the player dismisses: no display, no autorun, `roll_mode: players` — or the existing saved value.)
-   - **Session tail replay:** before clearing the display, check if the campaign's `session_tail.json` exists. The campaign-side path is the authoritative one — `~/.claude/dnd/campaigns/<name>/session_tail.json`. **Do NOT read** the legacy/fallback at `${CLAUDE_SKILL_DIR}/display/session_tail.json`; that file may exist from older sessions or other campaigns and will mislead the replay. If the campaign-side file does not exist, skip replay (display starts blank). If it does, read it. After `--clear` and full stats push (step 4 below), replay the tail by sending each entry via the appropriate `send.py` flag. Entry type → flag mapping:
+   - **Session tail replay:** before clearing the display, check if the campaign's `session_tail.json` exists. The campaign-side path is the authoritative one — `<DATA root>/campaigns/<name>/session_tail.json`. **Do NOT read** the legacy/fallback at `${CLAUDE_SKILL_DIR}/display/session_tail.json`; that file may exist from older sessions or other campaigns and will mislead the replay. If the campaign-side file does not exist, skip replay (display starts blank). If it does, read it. After `--clear` and full stats push (step 4 below), replay the tail by sending each entry via the appropriate `send.py` flag. Entry type → flag mapping:
      - `player` key present → `send.py --player <name>` with text via stdin
      - `npc` key present → `send.py --npc <name>` with text via stdin
      - `dice` key present → `send.py --dice` with text via stdin
@@ -209,8 +209,8 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
 
    2. **Backup the campaign directory** (always — both fresh and legacy):
       ```bash
-      cp -R ~/.claude/dnd/campaigns/<name> \
-            ~/.claude/dnd/campaigns/<name>.backup-$(date +%Y%m%d-%H%M%S)
+      cp -R "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>" \
+            "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>.backup-$(date +%Y%m%d-%H%M%S)"
       ```
       Tell the DM the backup path explicitly so they can revert if needed.
 
@@ -285,7 +285,7 @@ NPCs:     N named  |  Factions: N
 Locations: N distinct
 
 Campaign name: <name>
-Campaign dir:  ~/.claude/dnd/campaigns/<name>/
+Campaign dir:  <DATA root>/campaigns/<name>/
 
 Proceed? [y/n]
 ```
@@ -293,7 +293,7 @@ Proceed? [y/n]
 ### Step 5 — Create campaign files
 On confirmation:
 
-1. `mkdir -p ~/.claude/dnd/campaigns/<name>/characters`
+1. `mkdir -p "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>/characters"`
 2. Copy templates from `${CLAUDE_SKILL_DIR}/templates/`
 3. Write **world.md** (load-time core — kept small so it can be read in full every load):
    - `## World Foundations` — setting, geography, tone, magic level, calendar if present
@@ -326,7 +326,7 @@ On confirmation:
    - Leave `## Active Quests`, `## Session Flags` (autosave defaults on), `## DM Style Notes` as template defaults
 
 6b. Write the **lazy corpus** — the full source text, kept available but out of the hot path:
-   - `mkdir -p ~/.claude/dnd/campaigns/<name>/source`
+   - `mkdir -p "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>/source"`
    - For each chapter in arc.md, write `source/<chapter-id>.md` (e.g. `source/1.1.md`) containing that chapter's source text from the extracted chunks. Use the same chapter ids as arc.md.
    - Write `source-index.md` — a table mapping `chapter-id → source/<id>.md → one-line scope`, plus source title and import date.
    - Validate the layout: `python3 ${CLAUDE_SKILL_DIR}/scripts/corpus_check.py --campaign <name>` (expects "lazy-corpus layout OK"). Fix any orphan/missing-file problems before finishing. If it prints an **oversized-chapter WARNING**, split that chapter into sub-chapters (e.g. `1.1a` / `1.1b` at natural scene breaks) across `arc.md`, `source-index.md`, and `source/`, then re-run — a single giant chapter is the one thing that still bloats a load, so keep each `source/<id>.md` comfortably under the limit.
@@ -356,7 +356,7 @@ Campaign "<name>" created from <source title>.
 ---
 
 ## `/dm:dnd save`
-Write session events to session-log.md, update state.md (location, active quests, party HP/resources, recent events), update any characters/*.md that changed. Mirror each updated character to global roster (`~/.claude/dnd/characters/<name>.md`).
+Write session events to session-log.md, update state.md (location, active quests, party HP/resources, recent events), update any characters/*.md that changed. Mirror each updated character to global roster (`<DATA root>/characters/<name>.md`).
 
 **Inspiration tracking:** On every save, record each PC's Inspiration state in `state.md → ## Current Situation → Party status`. Use explicit text: `Inspiration ✓` if held, omit or `No Inspiration` if not. Inspiration persists across sessions and is NOT cleared by long rests. Example: `Mara: HP 24/24. Inspiration ✓. Theo: HP 24/24.`
 
@@ -371,14 +371,14 @@ If nothing changed in a category this session, leave it as-is. If a fact was wro
 
 Then update `## Faction Moves` in state.md: for each active faction, answer *"what did they do while the party was occupied?"* One line per faction — even if nothing visible yet. Confirm what was written.
 
-**Session tail archive:** `dnd-display-app.py` continuously writes `~/.claude/dnd/campaigns/<name>/session_tail.json` — campaign-specific path, atomic-write, skip-on-empty guarded (since 2026-05-01). At save time:
+**Session tail archive:** `dnd-display-app.py` continuously writes `<DATA root>/campaigns/<name>/session_tail.json` — campaign-specific path, atomic-write, skip-on-empty guarded (since 2026-05-01). At save time:
 
 1. Verify the campaign-side file exists and is non-empty:
    ```bash
    bash ${CLAUDE_SKILL_DIR}/display/verify_tail.sh <campaign-name>
    ```
    The script returns 0 if the tail is healthy (non-empty + valid JSON list), 1 if missing/empty/corrupt. If it returns 1, the tail is unsafe to rely on for next session's replay — **write a canonical replacement directly to the campaign path** with this session's 5–8 most important narrative beats as a JSON list of `{"text": "...", "_camp": "<name>"}` entries (no display call needed; the display may already be dead). Use the `${CLAUDE_SKILL_DIR}/display/write_canonical_tail.py` helper.
-2. Also write `~/.claude/dnd/campaigns/<name>/session-tail.md` (human-readable snapshot — companion to the JSON, used as fallback during /dm:dnd load if JSON read fails).
+2. Also write `<DATA root>/campaigns/<name>/session-tail.md` (human-readable snapshot — companion to the JSON, used as fallback during /dm:dnd load if JSON read fails).
 
 **Session log archival (run on every save after session count > 3):**
 session-log.md keeps only the **2 most recent full session entries**. Older entries move to `session-log-archive.md` (append, never delete). Before archiving each entry, extract a 3–5 bullet continuity summary and write it to `## Continuity Archive` in state.md. Format:
@@ -452,7 +452,7 @@ If `graph.json` doesn't exist yet for this campaign, skip the sweep entirely (no
       ```bash
       bash ${CLAUDE_SKILL_DIR}/display/verify_tail.sh <campaign-name>
       ```
-      Exit 0 = healthy. Exit 1 = missing/empty/corrupt → write a canonical replacement to `~/.claude/dnd/campaigns/<name>/session_tail.json` from session context (5–8 entries, each `{"text": "...", "_camp": "<name>"}`) BEFORE the display kill — once the display is dead, only the file matters. The display's own `_persist_tail` has skip-on-empty + atomic-write guards, but the backstop ensures a worst-case file state is impossible.
+      Exit 0 = healthy. Exit 1 = missing/empty/corrupt → write a canonical replacement to `<DATA root>/campaigns/<name>/session_tail.json` from session context (5–8 entries, each `{"text": "...", "_camp": "<name>"}`) BEFORE the display kill — once the display is dead, only the file matters. The display's own `_persist_tail` has skip-on-empty + atomic-write guards, but the backstop ensures a worst-case file state is impossible.
 2. Stop the display (always — even if `_display_running` was unclear):
    ```bash
    kill $(cat ${CLAUDE_SKILL_DIR}/display/app.pid 2>/dev/null) 2>/dev/null
@@ -543,7 +543,7 @@ Battle-map layouts are shared by all campaigns (`<data-root>/maps/library/`). Sc
 ---
 
 ## `/dm:dnd list`
-Read `~/.claude/dnd/campaigns/*/state.md`, print summary table: campaign name | last session date | session count.
+Read `<DATA root>/campaigns/*/state.md`, print summary table: campaign name | last session date | session count.
 
 ---
 
@@ -590,10 +590,10 @@ Default to `Step by step` if the question is dismissed. Either path lands in the
 6. Assign starting equipment per class + background
 7. Write to `characters/<name>.md` using `templates/character-sheet.md`; set `## Campaign History → Origin campaign`
 8. Add to `state.md` party line
-9. Mirror to global roster: `cp characters/<name>.md ~/.claude/dnd/characters/<name>.md`
+9. Mirror to global roster: `cp characters/<name>.md "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/characters/<name>.md"`
 10. Run supplemental builder to fetch any non-SRD spells/features the character uses:
     ```bash
-    python3 ${CLAUDE_SKILL_DIR}/scripts/build_supplemental.py --character ~/.claude/dnd/campaigns/<name>/characters/<charname>.md
+    python3 ${CLAUDE_SKILL_DIR}/scripts/build_supplemental.py --character "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>/characters/<charname>.md"
     ```
     This scans the character file for spells and features not in the SRD and fetches descriptions from dnd5e.wikidot.com into `dnd5e_supplemental.json`. Skips any entries already present. Safe to re-run.
 
@@ -605,7 +605,7 @@ Read `characters/<name>.md`, display cleanly. If name omitted and one character 
 ---
 
 ## `/dm:dnd character import <name> [from:<campaign>]`
-1. Find character sheet: `from:<campaign>` specified → that campaign's characters/; otherwise check global roster `~/.claude/dnd/characters/<name>.md`; if neither → search all campaigns, list matches, ask.
+1. Find character sheet: `from:<campaign>` specified → that campaign's characters/; otherwise check global roster `<DATA root>/characters/<name>.md`; if neither → search all campaigns, list matches, ask.
 2. Show summary (level, XP, HP, key inventory) and ask: *"Import at current level [X], or level up before starting?"*
    - As-is → copy directly; Level up first → run `/dm:dnd level up` on source sheet
 3. Copy to current campaign's `characters/<name>.md`. Update: Campaign, Last Updated, Previous campaigns, Death Saves (reset).
@@ -613,7 +613,7 @@ Read `characters/<name>.md`, display cleanly. If name omitted and one character 
 5. Add to `state.md` party line. Update global roster.
 6. Run supplemental builder for any non-SRD entries:
     ```bash
-    python3 ${CLAUDE_SKILL_DIR}/scripts/build_supplemental.py --character ~/.claude/dnd/campaigns/<name>/characters/<charname>.md
+    python3 ${CLAUDE_SKILL_DIR}/scripts/build_supplemental.py --character "${DND_CAMPAIGN_ROOT:-$HOME/.claude/dnd}/campaigns/<name>/characters/<charname>.md"
     ```
 7. Deliver one-paragraph in-character aside — how does it feel to step into a new world?
 
@@ -663,7 +663,7 @@ Rename a character across an entire campaign — `npcs.md`, `npcs-full.md`, `sta
 Maps to: `python3 ${CLAUDE_SKILL_DIR}/scripts/npc_rename.py --campaign <current> --old "..." --new "..." [flags]`. Use the currently loaded campaign by default; for explicit-campaign use, pass `--campaign <name>` directly.
 
 Flags:
-- `--random` — pick a name from the bundled fantasy-name corpus (~4800 unique combinations) that isn't already in `~/.claude/dnd/.name_registry.json`. Mutually exclusive with explicit "New Name".
+- `--random` — pick a name from the bundled fantasy-name corpus (~4800 unique combinations) that isn't already in `<DATA root>/.name_registry.json`. Mutually exclusive with explicit "New Name".
 - `--type npc | pc` (default `npc`) — `pc` also moves the character file and updates the global roster.
 - `--dry-run` — show all hits across files without writing. Always run first for sanity.
 - `--yes` — skip the confirmation prompt.
@@ -674,7 +674,7 @@ The script always backs up the campaign to `<name>.backup-rename-<old-slug>-YYYY
 After rename, the name registry is updated: old name marked `retired_from` this campaign with `replaced_by` pointing at the new slug; new name added with this campaign's current session as `first_session`.
 
 ## `/dm:dnd registry <subcommand>`
-View and manage the cross-campaign name registry at `~/.claude/dnd/.name_registry.json`. Used by `/dm:dnd npc rename --random` to never reuse a name and (in a follow-up) by `/dm:dnd new` / `/dm:dnd character new` / `/dm:dnd npc <new>` to flag duplicates at creation time.
+View and manage the cross-campaign name registry at `<DATA root>/.name_registry.json`. Used by `/dm:dnd npc rename --random` to never reuse a name and (in a follow-up) by `/dm:dnd new` / `/dm:dnd character new` / `/dm:dnd npc <new>` to flag duplicates at creation time.
 
 Maps to: `python3 ${CLAUDE_SKILL_DIR}/scripts/name_registry.py <subcommand> [args]`.
 
@@ -690,12 +690,12 @@ Maps to: `python3 ${CLAUDE_SKILL_DIR}/scripts/name_registry.py <subcommand> [arg
 
 The registry by default captures **canonical** characters (those in `npcs.md` / `npcs-full.md` / `characters/` / graph.json node names). Names that appear only in session-log prose (one-off mentions, throwaway NPCs, skill-check labels) are NOT registered by default — that's deliberate, to avoid banning common names because of incidental use. The `--include-prose` flag is opt-in for users who want the broader (noisier) view.
 
-**Severity config:** create `~/.claude/dnd/.name_registry_config.json` with `{"severity": "strict"}` to make all duplicate detections refuse-by-default rather than warn-and-allow. Set to `"none"` to disable checks entirely (registry rebuild and rename still work).
+**Severity config:** create `<DATA root>/.name_registry_config.json` with `{"severity": "strict"}` to make all duplicate detections refuse-by-default rather than warn-and-allow. Set to `"none"` to disable checks entirely (registry rebuild and rename still work).
 
 ---
 
 ## `/dm:dnd characters`
-List all characters in global roster (`~/.claude/dnd/characters/`). Display: name, race/class/level, origin campaign, previous campaigns, last updated.
+List all characters in global roster (`<DATA root>/characters/`). Display: name, race/class/level, origin campaign, previous campaigns, last updated.
 
 ---
 
@@ -820,7 +820,7 @@ Manage the dynamic campaign arc. The `advance`/`revise`/`new` subcommands are ac
 
 ## `/dm:dnd graph <subcommand>` — campaign relationship graph
 
-Local-only typed-edge relationship graph supplementing markdown. Stored at `~/.claude/dnd/campaigns/<name>/graph.json`. Supplements `npcs-full.md` / `session-log.md` — does not replace them. Edges are time-stamped (`since_session` / `until_session`), so historical state is recoverable.
+Local-only typed-edge relationship graph supplementing markdown. Stored at `<DATA root>/campaigns/<name>/graph.json`. Supplements `npcs-full.md` / `session-log.md` — does not replace them. Edges are time-stamped (`since_session` / `until_session`), so historical state is recoverable.
 
 **Auto-pulled at `/dm:dnd load` step 5** (scene-context) and **swept at `/dm:dnd save`** (relationship-shift extraction). The DM also uses `/dm:dnd graph scene-context` on demand mid-session, especially before heavy social or political scenes.
 
@@ -862,7 +862,7 @@ Print one node with all incoming and outgoing edges.
 Lower-level traversal — same as `scene-context` but with arbitrary seed nodes. Use when the scene framing doesn't fit (e.g. tracing faction politics independent of any specific place).
 
 ### `/dm:dnd graph extract [campaign-name] [--last-session-only]`
-Run a Haiku pass over the campaign's session-log to propose new edges with verbatim source-anchors. Outputs a proposal JSON to `~/.claude/dnd/campaigns/<name>/graph-proposals-<date>.json` for human review. Does **not** write to graph.json — that's the apply step.
+Run a Haiku pass over the campaign's session-log to propose new edges with verbatim source-anchors. Outputs a proposal JSON to `<DATA root>/campaigns/<name>/graph-proposals-<date>.json` for human review. Does **not** write to graph.json — that's the apply step.
 
 ### `/dm:dnd graph extract --deterministic [--last-session-only] [--write FILE]`
 **Zero-LLM alternative.** Pattern-matches session-log sentences against the bundled verb-table seed (`data/graph/verb_table_seed.yaml`) and emits the same proposal shape as the Haiku pass — no Claude API call, no cost, fully portable. Trades recall (~50%, clean subject-verb-object only) for precision (~95%) and determinism. Prints proposals to stdout, or writes them with `--write`.
@@ -908,10 +908,10 @@ Two-word **scene-meaning** generator (action verb + subject noun, One Page Solo 
 
 ## `/dm:dnd recap` — precomputed party state-diff
 
-Deterministic state-diff between two character snapshots — `python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py`. Recaps are the #1 thing an LLM hallucinates (wrong HP, dropped facts); this computes the change set from data so narration never has to. Reads the character sheets at `~/.claude/dnd/campaigns/<name>/characters/*.md` and merges live `tracker.json` conditions/concentration. Zero LLM calls.
+Deterministic state-diff between two character snapshots — `python3 ${CLAUDE_SKILL_DIR}/scripts/session_recap.py`. Recaps are the #1 thing an LLM hallucinates (wrong HP, dropped facts); this computes the change set from data so narration never has to. Reads the character sheets at `<DATA root>/campaigns/<name>/characters/*.md` and merges live `tracker.json` conditions/concentration. Zero LLM calls.
 
 ### `/dm:dnd recap snapshot --campaign N`
-Snapshot the party's current state (HP/temp/level/hit dice/death saves/conditions/concentration/exhaustion/inspiration/spell slots) to `~/.claude/dnd/campaigns/<name>/.recap/`. Rolls the previous `last.json` to `prev.json` so the next diff has a baseline. **Take a snapshot at `/dm:dnd end`** so the next session's load can diff against it.
+Snapshot the party's current state (HP/temp/level/hit dice/death saves/conditions/concentration/exhaustion/inspiration/spell slots) to `<DATA root>/campaigns/<name>/.recap/`. Rolls the previous `last.json` to `prev.json` so the next diff has a baseline. **Take a snapshot at `/dm:dnd end`** so the next session's load can diff against it.
 
 ### `/dm:dnd recap diff --campaign N [--before FILE] [--after FILE]`
 Diff the prior snapshot against the current state and print a one-paragraph plain-English summary (e.g. *"Aldric: took 18 damage (30→12 HP); gained Poisoned; spent 2 level 1 slots."*). With no `--before`, uses the stored `prev`/`last` snapshot; with no `--after`, snapshots live state on the fly. **Inject this line at `/dm:dnd load`** as the mechanical half of the recap. `--json` emits the structured change list.

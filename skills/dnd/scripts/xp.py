@@ -175,16 +175,39 @@ def _next_level_xp(current_level: int) -> int:
 
 # ── Character file I/O ────────────────────────────────────────────────────────
 
+def _name_key(name: str) -> str:
+    """Comparable form of a character name or file stem: 'Grosch Zahnbrecher',
+    'grosch-zahnbrecher' and 'grosch_zahnbrecher' all map to the same key."""
+    return re.sub(r"[\W_]+", "", name.lower())
+
+
+def _sheet_title(path: pathlib.Path) -> str:
+    """The character's display name: the sheet's '# Name' heading, else the stem."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# "):
+                return line[2:].strip()
+    except OSError:
+        pass
+    return path.stem
+
+
 def _find_char_path(campaign: str, char_name: str) -> pathlib.Path:
     char_dir = CAMPAIGNS_DIR / campaign / "characters"
     # Try exact match first
     exact = char_dir / f"{char_name.lower()}.md"
     if exact.exists():
         return exact
-    # Case-insensitive search
+    # Then by file stem or sheet title, ignoring case, spaces, hyphens and underscores,
+    # so the display name ("Grosch Zahnbrecher") finds grosch-zahnbrecher.md.
     if char_dir.exists():
-        for p in char_dir.glob("*.md"):
-            if p.stem.lower() == char_name.lower():
+        key = _name_key(char_name)
+        sheets = sorted(char_dir.glob("*.md"))
+        for p in sheets:
+            if _name_key(p.stem) == key:
+                return p
+        for p in sheets:
+            if _name_key(_sheet_title(p)) == key:
                 return p
     raise FileNotFoundError(
         f"Character file not found for '{char_name}' in campaign '{campaign}'.\n"
@@ -408,7 +431,9 @@ def cmd_award(args: argparse.Namespace) -> None:
             print(f"  Error: {e}", file=sys.stderr)
             sys.exit(1)
         xp, level = _read_char_state(path)
-        chars.append({"name": name, "xp": xp, "level": level, "path": path})
+        # Display and ledger use the sheet's own name, so a slug passed on the
+        # command line never shows up as a second player card on the display.
+        chars.append({"name": _sheet_title(path), "xp": xp, "level": level, "path": path})
 
     avg_level = round(sum(c["level"] for c in chars) / len(chars))
     players   = len(chars)

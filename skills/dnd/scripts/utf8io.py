@@ -10,8 +10,11 @@ permanent. read_text() below never produces that outcome:
     read-modify-write becomes a one-time migration to UTF-8;
   * anything else raises TextDecodeError, so the caller refuses loudly
     instead of silently flattening the file.
+
+Line endings come back as bare "\\n" either way (see _normalise_newlines).
 """
 import pathlib
+import re
 
 
 class TextDecodeError(ValueError):
@@ -30,7 +33,7 @@ def read_text(path: pathlib.Path) -> str:
     """
     raw = path.read_bytes()
     try:
-        return raw.decode("utf-8")
+        return _normalise_newlines(raw.decode("utf-8"))
     except UnicodeDecodeError:
         pass
     try:
@@ -43,4 +46,17 @@ def read_text(path: pathlib.Path) -> str:
         raise TextDecodeError(
             f"{path}: bytes decode as GBK but do not round-trip — refusing to read"
         ) from None
-    return text
+    return _normalise_newlines(text)
+
+
+def _normalise_newlines(text: str) -> str:
+    """Return `text` with every line ending as a bare "\\n".
+
+    The bytes are decoded as-is, so a CRLF file would hand callers "\\r\\n";
+    writing that back through a text-mode write on Windows turns it into
+    "\\r\\r\\n", and the next text-mode read sees two line breaks. Each
+    read-write round trip then doubled the blank lines in campaign files.
+    Runs of "\\r" before "\\n" (already-damaged files) collapse to one break.
+    """
+    text = re.sub(r"\r+\n", "\n", text)
+    return text.replace("\r", "\n")

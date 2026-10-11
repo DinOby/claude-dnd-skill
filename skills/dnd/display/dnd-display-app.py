@@ -23,6 +23,7 @@ Endpoints:
 import hmac
 import json
 import os
+import pathlib
 import queue
 import re
 import secrets
@@ -509,8 +510,13 @@ def _check_auto_trigger() -> None:
         _staged.clear()
 
     try:
-        with open(QUEUE_FILE, "w", encoding="utf-8") as f:
-            f.write(content)
+        # Append, never overwrite: a second batch that becomes ready before the
+        # DM read the first one used to replace it, and those actions were lost.
+        prefix = ""
+        if os.path.exists(QUEUE_FILE) and os.path.getsize(QUEUE_FILE) > 0:
+            prefix = "\n"
+        with open(QUEUE_FILE, "a", encoding="utf-8") as f:
+            f.write(prefix + content)
     except Exception:
         char_names = []
 
@@ -990,6 +996,10 @@ _clients_lock = threading.Lock()
 # Lets a dice-request know whether a target PC has a live phone (→ route there)
 # or not (→ open the on-screen roller). Guarded by _clients_lock.
 _client_chars: "dict[queue.Queue, str]" = {}
+# Main displays whose viewer chose "Playing as <character>" (remote players on
+# their own screen). They count as that character's device for dice routing
+# but stay main displays: they still get the battle map.
+_client_as: "set[queue.Queue]" = set()
 
 
 def _phone_present(char: str) -> bool:
@@ -1048,6 +1058,14 @@ def _get_tail_file() -> "str | None":
     return None
 
 
+def _current_campaign() -> str:
+    """Name of the active campaign from CAMP_FILE, or "" when none is set."""
+    try:
+        return open(CAMP_FILE, encoding="utf-8").read().strip()
+    except Exception:
+        return ""
+
+
 def _persist_tail() -> None:
     """Write _tail_buffer to disk. Refuses to overwrite content with empty.
 
@@ -1060,8 +1078,15 @@ def _persist_tail() -> None:
         # No active campaign — keep the buffer in memory, skip disk.
         return
     try:
+        current_camp = _current_campaign()
         with _tail_lock:
-            data = list(_tail_buffer)
+            # Never write another campaign's entries into this campaign's file:
+            # after a campaign switch the buffer still holds the old campaign's
+            # lines until new ones push them out, and the next /dnd load would
+            # replay them as if they belonged here.
+            data = [item for item in _tail_buffer
+                    if not (current_camp and isinstance(item, dict)
+                            and item.get("_camp") and item.get("_camp") != current_camp)]
         # Skip-on-empty guard: never blank a file that currently has content.
         if not data and os.path.exists(path):
             try:
@@ -1102,7 +1127,17 @@ def _load_tail() -> None:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return  # No file yet — keep in-memory state
+        # No file yet (fresh campaign). Drop lines stamped with another campaign
+        # so they are not persisted here; keep this campaign's and unstamped ones.
+        current_camp = _current_campaign()
+        if current_camp:
+            with _tail_lock:
+                kept = [item for item in _tail_buffer
+                        if not (isinstance(item, dict) and item.get("_camp")
+                                and item.get("_camp") != current_camp)]
+                _tail_buffer.clear()
+                _tail_buffer.extend(kept)
+        return
     except (OSError, json.JSONDecodeError) as e:
         print(f"_load_tail: read failed for {path}: {e}", file=sys.stderr)
         return
@@ -1263,12 +1298,13 @@ def _broadcast(payload: dict) -> None:
         for q in dead:
             _clients.remove(q)
             _client_chars.pop(q, None)
+            _client_as.discard(q)
 
 
 def _broadcast_main(payload: dict) -> None:
     """Like _broadcast, but only to main displays — phones never get the map."""
     with _clients_lock:
-        targets = [q for q in _clients if q not in _client_chars]
+        targets = [q for q in _clients if q not in _client_chars or q in _client_as]
     for q in targets:
         try:
             q.put_nowait(payload)
@@ -1303,6 +1339,31 @@ def favicon():
                                mimetype="image/vnd.microsoft.icon")
 
 
+def _lookup_inventory_line(name: str, category, level) -> "dict | None":
+    """Resolve an inventory line through item_names.py; None when nothing fits."""
+    import item_names as _item_names
+    import config_loader as _cfg
+    aliases = _item_names.german_aliases(os.path.join(_HERE, "config"))
+    aliases.update(_item_names.german_aliases(_cfg._default_user_dir()))
+    items = {}
+    camp = _current_campaign()
+    if camp:
+        try:
+            items = _item_names.campaign_items(str(_find_campaign(camp) / "items.md"))
+        except Exception:
+            items = {}
+    for kind, value in _item_names.resolve(name, aliases, items):
+        if kind == "campaign":
+            title, desc = items[value]
+            return {"found": True, "name": title, "category": "campaign item", "text": desc or title}
+        text = _lookup.lookup_with_level(value, category=category, level=level)
+        if text:
+            rec = _lookup.lookup_record(value, category=category)
+            return {"found": True, "name": value, "category": (rec or {}).get("_cat", category or ""),
+                    "text": text, "looked_up_as": value}
+    return None
+
+
 @app.route("/srd-lookup")
 def srd_lookup():
     """Look up a spell, item, condition, feature, or monster by name.
@@ -1328,6 +1389,13 @@ def srd_lookup():
         rec = _lookup.lookup_record(name, category=category)
         resolved_cat = (rec or {}).get("_cat", category or "")
         return jsonify({"found": True, "name": name, "category": resolved_cat, "text": text})
+    # Inventory lines as players write them ("4 Handäxte", "Einbrecherpaket"):
+    # a campaign item from <campaign>/items.md first, then the SRD under the
+    # German→English alias and the cleaned-up name.
+    if category in (None, "item", "equipment", "magic_item"):
+        hit = _lookup_inventory_line(name, category, level)
+        if hit:
+            return jsonify(hit)
     # Not found — offer near-miss "did you mean?" suggestions (typo recovery)
     # plus the wikidot fallback URL so the frontend can still link out.
     # `ref` is {} when there is no VERIFIED destination for this category, and
@@ -1683,10 +1751,18 @@ def stats():
                         {k: v for k, v in incoming.items() if k not in _MUTATION_KEYS}
                     )
 
-        # turn_order replaces entirely (None = clear); also ticks round-based effects
+        # turn_order: a full order replaces, a partial one (only "current" and/or
+        # "round", from --turn-current / --turn-round) merges into the stored
+        # order — the browser already merges, but the server used to replace,
+        # so a page reload mid-fight lost the whole order. None = clear.
+        # Also ticks round-based effects.
         _effect_expire_events: list[dict] = []
         if "turn_order" in data:
             new_to = data["turn_order"]
+            old_to = _current_stats.get("turn_order")
+            if (isinstance(new_to, dict) and "order" not in new_to
+                    and isinstance(old_to, dict) and old_to.get("order")):
+                new_to = {**old_to, **new_to}
             _current_stats["turn_order"] = new_to
             # Decrement round-based effects for the actor whose turn just started
             if new_to and isinstance(new_to, dict) and new_to.get("current"):
@@ -2089,6 +2165,46 @@ def tts_voice():
     return jsonify({"voice": voice, "persisted": ok}), 200
 
 
+_MUSIC_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".wav": "audio/wav"}
+
+
+def _own_music_file(kind: str) -> "str | None":
+    """<data-root>/audio/<kind>.(mp3|ogg|m4a|wav) — the table's own track, if any."""
+    try:
+        from paths import user_config_dir as _user_config_dir
+        folder = os.path.join(str(_user_config_dir().parent), "audio")
+    except Exception:
+        root = os.environ.get("DND_CAMPAIGN_ROOT", "").strip() or "~/.claude/dnd"
+        folder = os.path.join(os.path.expanduser(root), "audio")
+    for ext in _MUSIC_TYPES:
+        path = os.path.join(folder, kind + ext)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+@app.route("/audio/music/<kind>")
+def audio_music(kind):
+    """Background music for a situation (only "combat" so far).
+
+    The table's own file at <data-root>/audio/combat.mp3 (or .ogg/.m4a/.wav)
+    wins; otherwise a synthesised drum-and-drone loop is served.
+    """
+    if kind != "combat":
+        return "Not found", 404
+    own = _own_music_file(kind)
+    if own:
+        folder, name = os.path.split(own)
+        return send_from_directory(folder, name, mimetype=_MUSIC_TYPES[os.path.splitext(name)[1].lower()],
+                                   max_age=3600)
+    if not _audio:
+        return "Audio not available", 503
+    wav = _audio.get_combat_music_wav()
+    if wav is None:
+        return "Audio not available", 503
+    return Response(wav, mimetype="audio/wav", headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.route("/audio/sfx/<name>")
 def audio_sfx(name):
     """Serve a synthesized SFX WAV for the given effect name."""
@@ -2252,12 +2368,12 @@ def _map_images(m: "Optional[dict]", tokens: "Optional[list]" = None) -> dict:
             continue
         url = _assets.first_url("token", _token_candidates(tok))
         images["tokens"][tok["id"]] = url
-        if not url and tok.get("kind") != "object":
+        if not url:
             base = _TOKEN_NUMBER.sub("", tok.get("name", "")).strip() or tok.get("name", "")
             p = players.get(tok.get("name", "").casefold()) or {}
             hint = " ".join(str(p.get(k)) for k in ("race", "class") if p.get(k)) or None
             missing.append({"key": _asset_store.make_key("token", base), "kind": "token", "name": base,
-                            "category": tok.get("kind") if tok.get("kind") in ("pc", "npc", "enemy") else "npc",
+                            "category": tok.get("kind") if tok.get("kind") in ("pc", "npc", "enemy", "object") else "npc",
                             "campaign": camp, "hint": hint})
     if not only_tokens:
         floor = ((m.get("background") or {}).get("asset")) or None
@@ -2286,16 +2402,69 @@ def _map_images(m: "Optional[dict]", tokens: "Optional[list]" = None) -> dict:
 
 
 def _map_message(m: "Optional[dict]") -> dict:
-    """SSE payload for a full map: the map plus its image URLs (the model itself stays URL-free)."""
-    return {"map": m, "map_images": _map_images(m)} if m else {"map": None}
+    """SSE payload for a full map: the map plus its image URLs (the model itself stays URL-free),
+    and the tabs (maps shown recently) viewers can switch between."""
+    msg = {"map": m, "map_images": _map_images(m)} if m else {"map": None}
+    msg["map_tabs"] = _maps.tabs()
+    return msg
 
 
 @app.route("/map", methods=["GET"])
 def map_get():
-    """Map on screen (or null) with its images, the layouts in the library and the templates."""
+    """Map on screen (or null) with its images, the layouts in the library and the templates.
+
+    ?id=<map> returns that stored map instead ("preview": true) without putting
+    it on screen — a viewer looking at another tab, e.g. where a split-off part
+    of the party is.
+    """
+    want = (request.args.get("id") or "").strip()
+    if want:
+        m = _maps.peek(want)
+        if m is None:
+            return jsonify({"errors": [f"no map '{want}'"]}), 404
+        return jsonify({"map": m, "images": _map_images(m), "preview": True, "tabs": _maps.tabs()})
     m = _maps.current()
     return jsonify({"map": m, "images": _map_images(m), "library": _maps.library(),
-                    "templates": _maps.templates.list()})
+                    "templates": _maps.templates.list(), "tabs": _maps.tabs()})
+
+
+def _logbook_path() -> "str | None":
+    """<campaign>/logbuch.md — the players' log, sorted by quest (players' knowledge only)."""
+    camp = _current_campaign()
+    if not camp:
+        return None
+    try:
+        return str(_find_campaign(camp) / "logbuch.md")
+    except Exception:
+        return None
+
+
+@app.route("/logbook", methods=["GET"])
+def logbook_get():
+    """The players' logbook as markdown: {"markdown", "updated"} (empty when none yet).
+
+    Read-only and token-free like /map: it holds only what the characters know.
+    The DM writes the file; `push_stats.py --logbook-updated` tells open
+    displays to show a "new" marker.
+    """
+    path = _logbook_path()
+    if not path or not os.path.exists(path):
+        return jsonify({"markdown": "", "updated": None})
+    try:
+        text = _read_text(pathlib.Path(path))
+        updated = os.path.getmtime(path)
+    except Exception as e:
+        return jsonify({"markdown": "", "updated": None, "error": str(e)}), 500
+    return jsonify({"markdown": text, "updated": updated})
+
+
+@app.route("/logbook/notify", methods=["POST"])
+def logbook_notify():
+    """Tell every display the logbook changed (sent by push_stats.py --logbook-updated)."""
+    if not _token_ok():
+        return "Forbidden", 403
+    _broadcast({"logbook_updated": True})
+    return "", 204
 
 
 def _reconcile_scene(broadcast: bool = True, full: bool = True) -> "list[str]":
@@ -2395,6 +2564,10 @@ def map_post():
     warnings: list = []
     if ("map" in data or "show" in data) and _scene_blocks_map():
         return jsonify({"errors": [_scene_blocks_map()]}), 409
+    if data.get("close_tab"):
+        tabs = _maps.close_tab(str(data["close_tab"]))
+        _broadcast_main({"map_tabs": tabs})
+        return jsonify({"map_id": None, "rev": None, "warnings": [], "tabs": tabs})
     try:
         if data.get("hide"):
             _maps.hide()
@@ -2417,8 +2590,9 @@ def map_post():
                     return jsonify({"map_id": (_maps.current() or {}).get("id"), "rev": None,
                                     "warnings": ["every player character is already on the map"]})
             applied, warnings = _maps.patch(patch)
-            _broadcast_main({"map_patch": applied,
-                             "map_images": _map_images(_maps.current(), applied.get("add", []))})
+            if any(applied.get(k) for k in ("move", "add", "remove", "update")):   # a pure re-add changes nothing
+                _broadcast_main({"map_patch": applied,
+                                 "map_images": _map_images(_maps.current(), applied.get("add", []))})
             return jsonify({"map_id": applied["map_id"], "rev": applied["rev"], "warnings": warnings})
         else:
             return jsonify({"errors": ["expected map, show, patch or hide"]}), 400
@@ -2436,6 +2610,35 @@ def map_post():
 @app.route("/scene", methods=["GET"])
 def scene_get():
     return jsonify(_scenes.get())
+
+
+def _stored_map_for_place(location: str) -> "str | None":
+    """Id of a stored map that belongs to `location`, or None.
+
+    Matches the map id against the place's slug ("Schimmelsteg (Tropfviertel)"
+    → "schimmelsteg-tropfviertel", or "schimmelsteg" without the bracket) and
+    the map's display name. Maps this campaign has already used win over
+    layouts that only exist in the shared library.
+    """
+    import re as _re
+    base = _re.sub(r"\s*\([^)]*\)\s*", " ", location).strip()
+    names = {n.casefold() for n in (location.strip(), base) if n}
+    slugs = {_grid_map.slug(n) for n in (location, base) if n.strip()}
+    slugs.discard("")
+    if not slugs:
+        return None
+    candidates = []
+    for map_id in _maps.library():
+        if map_id in slugs:
+            candidates.append(map_id)
+            continue
+        m = _maps.load(map_id)
+        if m and str(m.get("name") or "").strip().casefold() in names:
+            candidates.append(map_id)
+    if not candidates:
+        return None
+    used = [c for c in candidates if os.path.exists(_maps._placement_path(c))]
+    return (used or candidates)[0]
 
 
 @app.route("/scene", methods=["POST"])
@@ -2458,7 +2661,9 @@ def scene_post():
         action = data.get("action")
         params = {k: v for k, v in data.items() if k != "action"}
         if action == "scene-set":
-            params.setdefault("map_id", None)   # a new place starts without the old map
+            # A new place starts without the old map — unless this place already
+            # has a stored map, which then comes back on its own.
+            params.setdefault("map_id", _stored_map_for_place(str(params.get("location") or "")))
         try:
             _scenes.apply(str(action or ""), **params)
         except _scene_state.SceneError as e:
@@ -2639,6 +2844,17 @@ def player_dice():
     _persist_log()
     _persist_tail()
     _broadcast(payload)
+
+    # Also hand the result to the DM's next turn (check_input.py reads the
+    # queue file), so a player's roll never has to be typed in a second time.
+    try:
+        line = f"[{character}]: rolled {spec}{mod_str}" + (f" ({label})" if label else "") \
+               + f" = {total} {breakdown}"
+        prefix = "\n" if os.path.exists(QUEUE_FILE) and os.path.getsize(QUEUE_FILE) > 0 else ""
+        with open(QUEUE_FILE, "a", encoding="utf-8") as f:
+            f.write(prefix + line)
+    except OSError:
+        pass
 
     # Correlate against any pending DM request. Case-insensitive match on the
     # character name — drop them from the request's expected-rollers set.
@@ -2890,20 +3106,22 @@ def stage_input():
     if not _char_ok(character, known):
         return "Forbidden", 403
 
-    # In solo mode (1 expected player), skip the manual Ready step and auto-trigger.
-    solo = (_expected_count == 1)
+    # Sending an action means it is meant for the DM: it counts as ready unless
+    # the client explicitly asks to hold it ("ready": false). The extra Ready
+    # step confused new players, and unconfirmed actions never reached the DM.
+    ready = data.get("ready", True) is not False
 
     with _staged_lock:
         _staged[character] = {
             "text":      text,
-            "ready":     solo,
+            "ready":     ready,
             "timestamp": _time.time(),
         }
         snap = _staged_snapshot()
 
     _broadcast({"staged_inputs": snap})
 
-    if solo:
+    if ready:
         _check_auto_trigger()
 
     return "", 204
@@ -3049,6 +3267,94 @@ def submit_now():
     return "", 204
 
 
+def _send_to_character(char: str, payload: dict) -> int:
+    """Deliver a payload only to the devices bound to `char` (phones and
+    "Playing as" screens); returns how many received it. Nobody else's stream
+    carries it, so a whisper cannot be read off another player's browser."""
+    c = (char or "").strip().lower()
+    with _clients_lock:
+        targets = [q for q, bound in _client_chars.items() if bound == c]
+    for q in targets:
+        try:
+            q.put_nowait(payload)
+        except queue.Full:
+            pass
+    return len(targets)
+
+
+@app.route("/player-input/secret", methods=["POST"])
+def secret_input():
+    """A player's secret action: goes to the DM's next turn only, never to the shared feed.
+
+    Body: {"character": "Zarith", "text": "..."}
+    """
+    if not _token_ok():
+        return "Forbidden", 403
+    if not _rate_ok(request.remote_addr):
+        return "Too Many Requests", 429
+    device_id = request.headers.get("X-DND-Device", "")
+    status = _device_ok(device_id, request.remote_addr)
+    if status == "denied":
+        return "Forbidden", 403
+    if status == "pending":
+        return jsonify({"status": "pending"}), 202
+    data = request.get_json(force=True, silent=True) or {}
+    character = str(data.get("character", ""))[:50].strip()
+    text = _sanitize_input(str(data.get("text", "")))
+    if not character or not text:
+        return "Bad Request", 400
+    with _stats_lock:
+        known = {p["name"] for p in _current_stats.get("players", [])}
+    if not _char_ok(character, known) or character == "Everybody":
+        return "Forbidden", 403
+    line = f"[{character}] (SECRET — only the DM may know this; answer with send.py --private): {text}"
+    try:
+        prefix = "\n" if os.path.exists(QUEUE_FILE) and os.path.getsize(QUEUE_FILE) > 0 else ""
+        with open(QUEUE_FILE, "a", encoding="utf-8") as f:
+            f.write(prefix + line)
+    except OSError:
+        return "Error", 500
+    _send_to_character(character, {"private": {"to": character, "from": character, "text": text, "own": True}})
+    return "", 204
+
+
+@app.route("/private", methods=["POST"])
+def private_message():
+    """The DM's whisper to one character (send.py --private NAME).
+
+    Body: {"to": "Zarith", "text": "..."} → {"delivered": N}. Not written to
+    the shared feed or the replay log.
+    """
+    if not _token_ok():
+        return "Forbidden", 403
+    data = request.get_json(force=True, silent=True) or {}
+    to = str(data.get("to", ""))[:50].strip()
+    text = str(data.get("text", ""))[:4000].strip()
+    if not to or not text:
+        return jsonify({"error": "to and text required"}), 400
+    n = _send_to_character(to, {"private": {"to": to, "from": "DM", "text": text}})
+    return jsonify({"delivered": n}), 200
+
+
+@app.route("/player-input/collect", methods=["POST"])
+def collect_staged_input():
+    """Hand every staged action to the DM now, ready or not, and clear them.
+
+    Called by check_input.py at the start of a turn after it read the queue
+    file, so actions a player typed but never confirmed are not silently
+    skipped. Returns [{"character", "text", "ready"}].
+    """
+    if not _token_ok():
+        return "Forbidden", 403
+    with _staged_lock:
+        collected = [{"character": c, "text": e["text"], "ready": bool(e.get("ready"))}
+                     for c, e in _staged.items()]
+        _staged.clear()
+    if collected:
+        _broadcast({"staged_inputs": {}})
+    return jsonify(collected), 200
+
+
 @app.route("/player-input/drain", methods=["POST"])
 def drain_player_input():
     """Read and clear the player input queue. Called by check_input.py at turn start.
@@ -3078,6 +3384,12 @@ def stream():
         _ch = (request.args.get("character") or request.args.get("char") or "").strip().lower()[:48]
         if _ch:
             _client_chars[q] = _ch
+        else:
+            # A main display that a remote player uses as "their" screen.
+            _as = (request.args.get("as") or "").strip().lower()[:48]
+            if _as:
+                _client_chars[q] = _as
+                _client_as.add(q)
 
     # Send the current scene immediately on connect so the browser
     # starts with the right background even mid-session.
@@ -3173,6 +3485,7 @@ def stream():
                 except ValueError:
                     pass
                 _client_chars.pop(q, None)
+                _client_as.discard(q)
 
     resp = Response(
         generate(),

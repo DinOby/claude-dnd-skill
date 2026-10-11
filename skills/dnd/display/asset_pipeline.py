@@ -70,7 +70,11 @@ def build_prompt(entry: dict, cfg: dict) -> str:
             subject += f" ({entry['category']})"
         if entry.get("hint"):
             subject += f". {entry['hint']}"
-    parts = [p.strip().rstrip(".") for p in (subject, style.get(kind, ""), style.get("base", ""))]
+    # Map objects (a well, a door) are tokens but must not get the portrait-in-a-frame
+    # style, or the image model paints a face into the well.
+    style_key = "object" if kind == "token" and entry.get("category") == "object" else kind
+    kind_style = style.get(style_key, style.get("item", "") if style_key == "object" else "")
+    parts = [p.strip().rstrip(".") for p in (subject, kind_style, style.get("base", ""))]
     return ". ".join(p[:1].upper() + p[1:] for p in parts if p) + "."
 
 

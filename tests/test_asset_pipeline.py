@@ -96,6 +96,17 @@ class ConfigAndPromptTests(_Case):
         own = ap.build_prompt({"key": "item:x", "kind": "item", "name": "Dolch", "prompt": "a rusty dagger"}, cfg)
         self.assertEqual(own, "A rusty dagger. Centred object. Painted art.")
 
+    def test_map_objects_never_get_the_portrait_style(self):
+        # A well drawn in the token style came back with a face inside the well.
+        cfg = {"style": {"base": "painted art", "item": "centred object", "token": "portrait in a frame"}}
+        well = {"key": "token:brunnen", "kind": "token", "name": "Brunnen", "category": "object",
+                "prompt": "an old stone well"}
+        self.assertEqual(ap.build_prompt(well, cfg), "An old stone well. Centred object. Painted art.")
+        cfg["style"]["object"] = "scenery, no faces"
+        self.assertEqual(ap.build_prompt(well, cfg), "An old stone well. Scenery, no faces. Painted art.")
+        npc = dict(well, category="npc", prompt="an innkeeper")
+        self.assertEqual(ap.build_prompt(npc, cfg), "An innkeeper. Portrait in a frame. Painted art.")
+
 
 class GenerateTests(_Case):
     def test_dummy_end_to_end(self):
