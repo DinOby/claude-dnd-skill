@@ -23,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest import mock
 
@@ -46,10 +47,8 @@ def _campaign(base: pathlib.Path, flag: str = "- engine: schatten") -> pathlib.P
 class TempDir(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)     # cleanups run last-in-first-out: helper processes end first
         self.base = pathlib.Path(self._tmp.name)
-
-    def tearDown(self):
-        self._tmp.cleanup()
 
 
 class AppendAndReadTests(TempDir):
@@ -94,29 +93,78 @@ class AppendAndReadTests(TempDir):
         self.assertEqual(sorted(e["seq"] for e in events), list(range(1, 41)))
 
 
-class LockTests(TempDir):
-    def test_a_held_lock_makes_the_write_fail_instead_of_interleaving(self):
-        d = _campaign(self.base)
-        path = eventlog.log_path(d)
-        path.parent.mkdir(parents=True)
-        lock = pathlib.Path(str(path) + ".lock")
-        lock.write_text("4711", encoding="utf-8")
-        with mock.patch.object(eventlog, "LOCK_TIMEOUT_S", 0.2):
-            with self.assertRaises(eventlog.LogError):
-                eventlog.append(d, "turn.clear", {}, src="test")
-        self.assertFalse(path.exists())
+_HOLDER = """
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from engine.eventlog import FileLock
+with FileLock(sys.argv[2]):
+    print("locked", flush=True)
+    time.sleep(120)
+"""
 
-    def test_a_stale_lock_is_broken(self):
-        d = _campaign(self.base)
-        path = eventlog.log_path(d)
-        path.parent.mkdir(parents=True)
-        lock = pathlib.Path(str(path) + ".lock")
-        lock.write_text("4711", encoding="utf-8")
-        old = lock.stat().st_mtime - eventlog.LOCK_STALE_S - 5
-        os.utime(lock, (old, old))
-        eventlog.append(d, "turn.clear", {}, src="test")
-        self.assertEqual(len(eventlog.read(d)[0]), 1)
-        self.assertFalse(lock.exists())
+_WRITER = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from engine import eventlog
+for i in range(10):
+    eventlog.append(sys.argv[2], "turn.round", {"round": i}, src="test")
+"""
+
+
+class LockTests(TempDir):
+    """The lock is an OS lock: a crashed holder frees it, a live one is never overrun."""
+
+    def setUp(self):
+        super().setUp()
+        self.d = _campaign(self.base)
+        self.path = eventlog.log_path(self.d)
+        self.path.parent.mkdir(parents=True)
+        self.lock = str(self.path) + ".lock"
+
+    def _holder(self):
+        proc = subprocess.Popen([sys.executable, "-c", _HOLDER, str(SCRIPTS), self.lock],
+                                stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stdout.close()))
+        self.assertEqual(proc.stdout.readline().strip(), "locked")
+        return proc
+
+    def test_a_live_holder_is_never_overrun_and_the_game_is_not_blocked(self):
+        self._holder()
+        with mock.patch.object(eventlog, "LOCK_TIMEOUT_S", 0.3):
+            with self.assertRaises(eventlog.LogError):
+                eventlog.append(self.d, "turn.clear", {}, src="test")
+            err = io.StringIO()
+            started = time.monotonic()
+            with contextlib.redirect_stderr(err):
+                n = shadow.record(self.d, [("turn.clear", {})], src="test")
+            self.assertLess(time.monotonic() - started, 2.0)          # gives up, does not hang
+        self.assertEqual(n, 0)
+        self.assertIn("gesperrt", err.getvalue())
+        self.assertFalse(self.path.exists())
+
+    def test_a_crashed_holder_leaves_a_lock_file_that_locks_nothing(self):
+        proc = self._holder()
+        proc.kill()            # hard kill: TerminateProcess on Windows, SIGKILL elsewhere — no cleanup runs
+        proc.wait()
+        self.assertTrue(os.path.exists(self.lock))                  # the file is still there …
+        started = time.monotonic()
+        eventlog.append(self.d, "turn.clear", {}, src="test")       # … and does not block
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(len(eventlog.read(self.d)[0]), 1)
+
+    def test_an_old_lock_file_from_before_is_ignored(self):
+        pathlib.Path(self.lock).write_text("4711", encoding="utf-8")
+        eventlog.append(self.d, "turn.clear", {}, src="test")
+        self.assertEqual(len(eventlog.read(self.d)[0]), 1)
+
+    def test_parallel_processes_never_share_a_sequence_number(self):
+        procs = [subprocess.Popen([sys.executable, "-c", _WRITER, str(SCRIPTS), str(self.d)])
+                 for _ in range(4)]
+        for p in procs:
+            self.assertEqual(p.wait(timeout=60), 0)
+        events, skipped = eventlog.read(self.d)
+        self.assertEqual(skipped, [])
+        self.assertEqual(sorted(e["seq"] for e in events), list(range(1, 41)))
 
 
 class TextGuardTests(TempDir):

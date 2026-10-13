@@ -43,10 +43,18 @@ Grundlage für Phase 3 (automatische Runde) und Phase 3b (vereinfachter Kampf).
 | Webserver (Display) | **nie** | hängt Spielerwürfe und -wünsche an (eigene Sperre) | zeigt an |
 | Spieler-Browser | nie | nur über den Webserver | – |
 
-- Das Logbuch hat eine **Sperrdatei** (`events.jsonl.lock`) gegen
-  gleichzeitiges Schreiben. Wer sie nicht innerhalb von 2 Sekunden bekommt,
-  schreibt nicht und meldet das. Eine Sperre, die älter als 10 Sekunden ist,
-  gilt als liegen geblieben und wird aufgehoben.
+- Das Logbuch hat eine **Sperre** gegen gleichzeitiges Schreiben: eine
+  Betriebssystem-Sperre auf `events.jsonl.lock` (Windows: LockFileEx, sonst
+  flock). Nicht die Datei sperrt, sondern das Betriebssystem – und das gibt die
+  Sperre frei, sobald der Halter endet oder abstürzt. Eine nach einem Absturz
+  liegen gebliebene Datei sperrt deshalb nichts; nichts muss erraten oder
+  gelöscht werden, und zwei Schreiber können sie nie gleichzeitig halten.
+- Wer die Sperre nicht innerhalb von 2 Sekunden bekommt, schreibt nicht und
+  meldet das (im Schattenbetrieb: Warnung, Spiel läuft weiter). Das Spiel wird
+  in keinem Fall blockiert.
+- Version 1 dieses Plans hob „veraltete“ Sperrdateien nach 10 Sekunden auf.
+  Bei zwei gleichzeitig wartenden Schreibern hätte das die frische Sperre des
+  einen löschen können; deshalb ersetzt.
 - Spielerwürfe und -wünsche werden erst wirksam, wenn `game.py eingang
   übernehmen` sie prüft und als Ereignis mit Herkunft `spieler:<Name>` ins
   Logbuch schreibt.

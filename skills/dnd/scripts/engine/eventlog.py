@@ -19,7 +19,6 @@ from engine.textguard import clean, clean_data
 
 LOG_NAME = "events.jsonl"
 LOCK_TIMEOUT_S = 2.0
-LOCK_STALE_S = 10.0
 
 
 class LogError(Exception):
@@ -35,37 +34,73 @@ def log_path(campaign_dir) -> pathlib.Path:
     return pathlib.Path(campaign_dir) / "game" / LOG_NAME
 
 
-class FileLock:
-    """Cross-process lock via O_EXCL; a lock older than LOCK_STALE_S is broken."""
+if os.name == "nt":
+    import msvcrt
 
-    def __init__(self, path, timeout: float = LOCK_TIMEOUT_S):
+    def _try_lock(fd: int) -> bool:
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+
+    def _unlock(fd: int) -> None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _try_lock(fd: int) -> bool:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    def _unlock(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+class FileLock:
+    """Cross-process lock held by the operating system on <path>.
+
+    The lock is not the file's existence but an OS lock on it (LockFileEx on
+    Windows, flock elsewhere). The OS drops it when the holder exits or crashes,
+    so a lock file left behind after a crash locks nothing — there is no stale
+    lock to guess about and nothing to delete, and two writers can never both
+    hold it. A writer that cannot get it within `timeout` gives up (LogError);
+    in shadow mode that is one warning and play goes on.
+    """
+
+    def __init__(self, path, timeout: Optional[float] = None):
         self.path = str(path)
-        self.timeout = timeout
+        self.timeout = LOCK_TIMEOUT_S if timeout is None else timeout
+        self._fd: Optional[int] = None
 
     def __enter__(self):
+        try:
+            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as exc:
+            raise LogError(f"Sperrdatei nicht anlegbar: {exc}") from exc
         deadline = time.monotonic() + self.timeout
-        while True:
-            try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode())
+        while not _try_lock(fd):
+            if time.monotonic() > deadline:
                 os.close(fd)
-                return self
-            except FileExistsError:
-                try:
-                    if time.time() - os.path.getmtime(self.path) > LOCK_STALE_S:
-                        os.remove(self.path)
-                        continue
-                except OSError:
-                    continue
-                if time.monotonic() > deadline:
-                    raise LogError(f"Logbuch ist gesperrt ({self.path})")
-                time.sleep(0.05)
+                raise LogError("Logbuch ist gerade von einem anderen Schreiber gesperrt")
+            time.sleep(0.02)
+        self._fd = fd
+        return self
 
     def __exit__(self, *exc):
+        fd, self._fd = self._fd, None
+        if fd is None:
+            return
         try:
-            os.remove(self.path)
+            _unlock(fd)
         except OSError:
             pass
+        os.close(fd)
 
 
 def read(campaign_dir) -> "tuple[list[dict], list[Skipped]]":
