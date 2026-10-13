@@ -588,7 +588,19 @@ def main() -> None:
         sys.exit(rc)
 
     _send(FLASK_URL, json.dumps(payload).encode("utf-8"), _read_token())
+    _shadow_record(payload)
     sys.exit(rc)
+
+
+def _shadow_record(payload: dict) -> None:
+    """Shadow mode (engine: schatten): also note the change in the game log. Never fails."""
+    try:
+        from engine import shadow
+    except Exception as exc:                      # noqa: BLE001
+        print(f"⚠ Spielstand-Logbuch: Engine nicht ladbar ({exc}). Das Spiel läuft normal weiter.",
+              file=sys.stderr)
+        return
+    shadow.record(shadow.active_campaign_dir(), shadow.events_from_payload(payload), src="push_stats")
 
 
 if __name__ == "__main__":

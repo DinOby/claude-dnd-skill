@@ -98,6 +98,10 @@ DIFF_LABELS: dict[int, str] = {0: "Easy", 1: "Medium", 2: "Hard", 3: "Deadly"}
 from paths import find_campaign as _find_campaign, campaigns_dir as _campaigns_dir, display_dir as _display_dir
 CAMPAIGNS_DIR = _campaigns_dir()
 DISPLAY_SCRIPT = _display_dir() / "push_stats.py"
+try:
+    from engine import shadow as _shadow
+except Exception:                                  # noqa: BLE001 — shadow mode is optional
+    _shadow = None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -269,6 +273,7 @@ def _push_xp_display(char_name: str, new_xp: int, current_level: int) -> None:
         [sys.executable, str(DISPLAY_SCRIPT),
          "--player", char_name, "--xp", str(new_xp), str(next_lvl)],
         capture_output=True,
+        env=_shadow.child_env() if _shadow else None,   # the award is recorded by this script
     )
 
 
@@ -349,6 +354,12 @@ def _record_award(campaign: str, entries: list, note: str) -> None:
     except Exception as exc:                      # noqa: BLE001
         print(f"xp.py: warning — could not write the award ledger: {exc}",
               file=sys.stderr)
+    if _shadow is not None:
+        _shadow.record(CAMPAIGNS_DIR / campaign,
+                       [("xp.award", {"who": e["name"], "awarded": e["awarded"],
+                                      "total_after": e["total_after"], "note": note})
+                        for e in entries],
+                       src="xp")
 
 
 def _read_ledger(campaign: str) -> list:

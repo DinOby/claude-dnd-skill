@@ -153,5 +153,6 @@ revision_log: []
 ## Session Flags
 *(tutor_mode, autorun, autorun_interval, tts_voice, sfx_languages, autosave — session-scoped flags set via /dnd commands or by the display companion)*
 *(autosave: on|off — default on. Governs the behind-the-scenes continuity checkpoint (Live State Flags + graph + session tail). Toggle with /dm:dnd autosave on|off.)*
+*(engine: aus|schatten|an — default aus. schatten = scripts also write the game-state log game/events.jsonl; see docs/plans/spielzustand-engine.md.)*
 
 ## DM Notes (hidden from players)

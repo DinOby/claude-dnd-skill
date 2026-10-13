@@ -45,6 +45,10 @@ import argparse
 import time
 from datetime import datetime, timezone
 from paths import find_campaign as _find_campaign, display_dir as _display_dir
+try:
+    from engine import shadow as _shadow
+except Exception:                                  # noqa: BLE001 — shadow mode is optional
+    _shadow = None
 
 PUSH_STATS = str(_display_dir() / "push_stats.py")
 SEND_PY    = str(_display_dir() / "send.py")
@@ -84,9 +88,37 @@ def _load(campaign: str) -> dict:
         return {}
 
 
+_saved = False   # set by _save(); main() records the command in shadow mode only then
+
+
 def _save(campaign: str, state: dict) -> None:
+    global _saved
     with open(_state_path(campaign), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+    _saved = True
+
+
+def _shadow_events(args) -> "list[tuple[str, dict]]":
+    """The log events for a tracker command that changed tracker.json."""
+    if args.cmd == "condition":
+        if args.action == "clear":
+            return [("condition.clear", {"who": args.entity})]
+        return [(f"condition.{args.action}", {"who": args.entity, "name": args.condition})]
+    if args.cmd == "concentrate":
+        spell = None if args.spell.lower() == "break" else args.spell
+        return [("concentration.set", {"who": args.entity, "spell": spell})]
+    if args.cmd == "effect":
+        if args.action == "start":
+            return [("effect.start", {"who": args.entity, "name": args.spell,
+                                      "duration": args.duration, "conc": args.conc.lower() == "conc"})]
+        if args.action == "end":
+            return [("effect.end", {"who": args.entity, "name": args.spell})]
+        return [("effect.tick", {"who": args.entity})]
+    if args.cmd == "saves":
+        return [("deathsave", {"who": args.entity, "result": args.action})]
+    if args.cmd == "clear":
+        return [("tracker.clear", {"all": bool(getattr(args, "all", False))})]
+    return []
 
 
 def _entity(state: dict, name: str) -> dict:
@@ -160,6 +192,7 @@ def _push_conditions(entity_name: str, conditions: list[str]) -> None:
             [sys.executable, PUSH_STATS, "--player", entity_name,
              "--conditions", cond_str],
             capture_output=True, timeout=3,
+            env=_shadow.child_env() if _shadow else None,   # already recorded by this script
         )
     except Exception:
         pass  # Display not running — fail silently
@@ -506,6 +539,9 @@ def main() -> None:
         cmd_clear(args.campaign, getattr(args, "all", False))
     else:
         p.print_help()
+
+    if _saved and _shadow is not None:
+        _shadow.record(_find_campaign(args.campaign), _shadow_events(args), src="tracker")
 
 
 if __name__ == "__main__":
