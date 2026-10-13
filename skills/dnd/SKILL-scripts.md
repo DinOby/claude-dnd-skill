@@ -501,7 +501,7 @@ Likelihoods: `sure-thing`, `likely`, `50/50`, `unlikely`, `no-way`. Verdict suff
 
 ## Content Images — `scripts/assets.py`
 
-Images for items (later also tokens and maps) are **never generated during play**. The display puts content without an image on a wait-list (`<data-root>/assets/pending-assets.json`); this script works through it afterwards. Image services are swappable in `display/config/image-provider.json` (override in `<data-root>/config/`). Keys are `item:<name>`, `token:<name>`, `map:<name>`, or a plain item name.
+The display puts content without an image on a wait-list (`<data-root>/assets/pending-assets.json`) and — with `"auto_generate": {"enabled": true}` in `image-provider.json`, the default — runs `assets.py generate` itself in the background ~20 s later (`delay_seconds`, at most `max_per_run` per run, one run at a time, `backoff_minutes` pause after a run that only failed). Set a description first with `assets.py prompt KEY "…" --add` in the same call that adds the content. This script still works the list by hand (`generate`, `status`, `skip`). Image services are swappable in `display/config/image-provider.json` (override in `<data-root>/config/`). Keys are `item:<name>`, `token:<name>`, `map:<name>`, or a plain item name.
 
 ```bash
 A="python3 ${CLAUDE_SKILL_DIR}/scripts/assets.py"

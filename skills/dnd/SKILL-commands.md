@@ -440,7 +440,7 @@ If `graph.json` doesn't exist yet for this campaign, skip the sweep entirely (no
         - **Did not land — pressure absorbed without consequence** → the beat is overdue and its current shape no longer fits. **Run `/dm:dnd arc revise` immediately**; do not just update `steering_notes`. The beat's `what_changes` was event-shaped (something specific happens) when it should be consequence-shaped (something fundamentally different is true) — revise both `what_changes` and `world_pressure` to fit a path that DOES land. The committed shape bends; it does not break.
         - **Pressure not yet delivered** → leave beat alone; expected to deliver next session.
       iv. Update `steering_notes` for the next outstanding beat with the *consequence shape* expected, not the specific event.
-   f. **Images:** run `python3 ${CLAUDE_SKILL_DIR}/scripts/assets.py status`. If entries are pending (new NPCs, the player characters' portraits, map objects), mention it in one line and offer `/dm:dnd assets generate` — never generate without the user's go-ahead (it costs money).
+   f. **Images:** run `python3 ${CLAUDE_SKILL_DIR}/scripts/assets.py status`. The display generates pending entries on its own during play; anything still pending (failed, blocked by the monthly cap, no credit left at the provider) — mention it in one line with the reason from `status`.
    g. **Tail verification (added 2026-05-01):** before killing the display, verify the campaign-side `session_tail.json` is healthy:
       ```bash
       bash ${CLAUDE_SKILL_DIR}/display/verify_tail.sh <campaign-name>

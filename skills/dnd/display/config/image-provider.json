@@ -22,6 +22,12 @@
     ]
   },
   "max_attempts": 3,
+  "auto_generate": {
+    "enabled": true,
+    "delay_seconds": 20,
+    "max_per_run": 8,
+    "backoff_minutes": 15
+  },
   "style": {
     "base": "Painted dark-fantasy game art, rich colours, soft rim light, clean composition, no text, no letters, no watermark",
     "item": "a single object centred on a plain dark background, three-quarter view, like an inventory icon",

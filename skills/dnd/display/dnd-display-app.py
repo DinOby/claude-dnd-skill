@@ -89,13 +89,42 @@ except Exception:
     _vfx = None   # type: ignore
 
 # Content images (items, tokens, maps) with category placeholders, plus the
-# wait-list of content that still needs an image (never generated during play)
+# wait-list of content that still needs an image. With auto_generate on (the
+# default) the display works that list off in the background a few seconds
+# after something new is queued (auto_assets.py) — within the monthly cap.
 import asset_store as _asset_store
 from asset_queue import PendingQueue as _PendingQueue
 from item_categories import ItemCategorizer as _ItemCategorizer
 _item_categories = _ItemCategorizer()
 _assets = _asset_store.AssetStore(categorize=_item_categories)
 _asset_queue = _PendingQueue(os.path.join(_assets.global_root, "pending-assets.json"))
+try:
+    import auto_assets as _auto_assets
+    from asset_pipeline import provider_config as _provider_config
+    _provider_cfg = _provider_config()
+
+    def _auto_settings() -> dict:
+        try:
+            return _auto_assets.settings(_provider_cfg.get())
+        except Exception:
+            return dict(_auto_assets.DEFAULTS, enabled=False)
+
+    _auto_images = _auto_assets.AutoGenerator(_auto_settings, lambda: len(_asset_queue.entries("pending")))
+except Exception as _e:                            # images are optional; the display runs without them
+    print(f"auto images: off ({_e})", file=sys.stderr)
+    _auto_images = None
+
+
+def _queue_assets(items) -> None:
+    """Put content without an image on the wait-list; start the background generator for new entries."""
+    items = list(items)
+    added = _asset_queue.add_many(items)
+    if _auto_images is None:
+        return
+    # Also when the DM registered the entry beforehand with its own description
+    # (assets.py prompt KEY "…" --add): then add_many finds it known, but it still waits.
+    if added or {i.get("key") for i in items} & {e["key"] for e in _asset_queue.entries("pending")}:
+        _auto_images.poke()
 
 # Battle-grid maps (main display only): layouts shared across campaigns in the
 # library, token placement per campaign — see grid_map.py
@@ -2401,7 +2430,7 @@ def _queue_missing_assets(stats: dict) -> None:
                                   "name": _asset_store.base_name("item", name),
                                   "category": info["category"], "campaign": camp})
         if items:
-            _asset_queue.add_many(items)
+            _queue_assets(items)
     except Exception as e:
         print(f"asset queue: {e}", file=sys.stderr)
 
@@ -2512,7 +2541,7 @@ def _map_images(m: "Optional[dict]", tokens: "Optional[list]" = None) -> dict:
     missing = [i for i in missing if i["key"]]
     if missing:
         try:
-            _asset_queue.add_many(missing)
+            _queue_assets(missing)
         except Exception as e:
             print(f"asset queue: {e}", file=sys.stderr)
     return images
@@ -3643,4 +3672,6 @@ if __name__ == "__main__":
         print(f"DnD DM Display — Flask server starting on {scheme}://localhost:5001")
         print(f"Open {scheme}://localhost:5001 in your browser, then Chromecast the tab.")
         print()
+    if _auto_images is not None and _asset_queue.entries("pending"):
+        _auto_images.poke()   # content still waiting from last time
     app.run(host=host, port=5001, threaded=True, debug=False, ssl_context=ssl_ctx)
