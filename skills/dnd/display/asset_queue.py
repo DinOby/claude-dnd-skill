@@ -51,13 +51,17 @@ class FileLock:
                 os.write(fd, str(os.getpid()).encode())
                 os.close(fd)
                 return self
-            except FileExistsError:
+            except (FileExistsError, PermissionError):
+                # PermissionError: on Windows a lock file another thread is just
+                # deleting ("delete pending") refuses O_EXCL with access denied
+                # instead of "exists" — it is busy, not forbidden. Wait like for
+                # a held lock (a real permission problem ends in the timeout).
                 try:
                     if time.time() - os.path.getmtime(self.path) > _LOCK_STALE_S:
                         os.remove(self.path)
                         continue
                 except OSError:
-                    continue
+                    pass
                 if time.monotonic() > deadline:
                     raise TimeoutError(f"could not lock {self.path}")
                 time.sleep(0.05)
