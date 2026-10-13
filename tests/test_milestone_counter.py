@@ -30,6 +30,7 @@ class MilestoneCounterTests(unittest.TestCase):
     def setUpClass(cls):
         cls.mod = _import_app()
         cls.mod._token_ok = lambda: True
+        cls.mod._host_ok = lambda: True
         cls.client = cls.mod.app.test_client()
 
     def setUp(self):

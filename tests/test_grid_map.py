@@ -431,7 +431,7 @@ class RouteTests(IsolatedApp):
         self.assertEqual(code, 400)
         self.assertTrue(self.main.empty())
         self.assertEqual(self.post({"nonsense": 1})[0], 400)
-        with mock.patch.object(self.app, "_token_ok", lambda: False):
+        with mock.patch.object(self.app, "_host_ok", lambda: False):   # a DM endpoint
             self.assertEqual(self.client.post("/map", json={"hide": True}).status_code, 403)
 
 

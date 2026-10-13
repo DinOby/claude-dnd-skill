@@ -532,10 +532,7 @@ This fires a green-bordered block in the companion feed showing each character's
 
 Enabled via `/dm:dnd tutor on`. Stored as `tutor_mode: true` in `state.md → ## Session Flags`. Check this flag on every `/dm:dnd load`. Session-scoped — does not persist unless explicitly set again.
 
-**DM Help button vs Tutor Mode — these are separate:**
-- The **◈ DM Help button** on the display fires a single one-shot hint via `dm_help.py`. It sends one `--tutor` block to the display, then stops. It does NOT set `tutor_mode: true` in state.md. It does NOT enable ongoing tutor sends from the DM.
-- **Tutor Mode** (ongoing) is only active when `tutor_mode: true` is present in state.md. Check this flag at load; do not infer it from the presence of a tutor block in the display log.
-- When a DM Help hint appears in context mid-session, do NOT start appending `--tutor` blocks to your own responses. Only do so if `tutor_mode: true` is set.
+**Tutor Mode** is only active when `tutor_mode: true` is present in state.md. Check this flag at load; do not infer it from the presence of a tutor block in the display log. (The display's former ◈ DM Help button is switched off in this fork: it started its own Claude session from a click any player could make.)
 
 When active, append a `--tutor` send at the end of each Bash block for:
 

@@ -63,5 +63,6 @@ class IsolatedApp(unittest.TestCase):
         super().setUpClass()
         cls.home = isolate_process()
         cls.app = import_app(cls.app_module_name)
-        cls.app._token_ok = lambda: True
+        cls.app._token_ok = lambda: True   # player endpoints
+        cls.app._host_ok = lambda: True    # DM endpoints (tests/test_roles.py checks both for real)
         cls.client = cls.app.app.test_client()

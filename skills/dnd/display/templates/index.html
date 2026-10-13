@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="dnd-token" content="{{ lan_token }}">
+<meta name="dnd-role" content="{{ dnd_role }}">
 <meta name="narrator-voice" content="{{ narrator_voice }}">
 <meta name="tts-available" content="{{ '1' if tts_available else '0' }}">
 
@@ -1762,31 +1763,7 @@
     50%       { opacity: 1; }
   }
 
-  /* ── DM Help button ── */
-  #dm-help-btn {
-    position: fixed;
-    bottom: 22px; right: 24px;
-    z-index: 6;
-    font-family: 'Cinzel', serif;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: rgba(200,165,80,0.82);
-    background: rgba(20,14,6,0.55);
-    border: 1px solid rgba(180,140,60,0.5);
-    border-radius: 3px;
-    padding: 6px 12px;
-    cursor: pointer;
-    opacity: 1;
-    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-    pointer-events: auto;
-    user-select: none;
-    box-shadow: 0 0 6px rgba(180,140,60,0.15);
-  }
-  #dm-help-btn:hover  { color: rgba(220,185,100,1); border-color: rgba(210,170,80,0.85); background: rgba(30,20,8,0.75); box-shadow: 0 0 10px rgba(180,140,60,0.3); }
-  #dm-help-btn.pending { color: rgba(180,140,60,0.7); border-color: rgba(180,140,60,0.4); cursor: default; box-shadow: none; }
-  #dm-help-btn.locked { color: rgba(180,90,60,0.85); border-color: rgba(180,90,60,0.5); }
-  #dm-help-btn:disabled { pointer-events: none; }
+
 
   /* ── Device approval cards ── */
   #device-approvals {
@@ -3252,7 +3229,6 @@
 
   /* uniform rail buttons (new launchers + adopted action buttons) */
   :root[data-skin="editorial"] body:not(.input-only) #ed-rail .ed-launch,
-  :root[data-skin="editorial"] body:not(.input-only) #ed-rail #dm-help-btn,
   :root[data-skin="editorial"] body:not(.input-only) #ed-rail #phone-mode-btn{
     position:static !important; inset:auto !important; opacity:1 !important;
     display:flex !important; flex-direction:column; align-items:center; justify-content:center; gap:4px;
@@ -3262,8 +3238,7 @@
     font-family:'Syne',sans-serif; font-weight:700; font-size:9px; letter-spacing:.1em; text-transform:uppercase;
     line-height:1.2; text-align:center; cursor:pointer; box-shadow:none;
     transition:background .15s, color .15s, border-color .15s; }
-  :root[data-skin="editorial"] body:not(.input-only) #ed-rail .ed-launch:hover,
-  :root[data-skin="editorial"] body:not(.input-only) #ed-rail #dm-help-btn:hover{
+  :root[data-skin="editorial"] body:not(.input-only) #ed-rail .ed-launch:hover{
     border-color:var(--e-accent); color:var(--e-accent); background:var(--e-strong); }
   :root[data-skin="editorial"] body:not(.input-only) #ed-rail .ed-launch.active{
     background:var(--e-accent); color:var(--e-dice-text); border-color:var(--e-accent); }
@@ -3679,11 +3654,8 @@
   </div>
 </div>
 
-<!-- DM Help — on-demand hint button -->
-<button id="dm-help-btn" title="Request a DM hint for the current scene">◈ DM Help</button>
-
 <!-- Editorial right-edge rail + drawer scrim (shown only under data-skin="editorial" on the TV view).
-     #dm-help-btn and #phone-mode-btn are adopted into the rail at load; they are position:fixed,
+     #phone-mode-btn is adopted into the rail at load; it is position:fixed,
      so Vellum (rail = display:contents) keeps their original placement untouched. -->
 <div id="ed-scrim"></div>
 <div id="ed-rail" aria-label="Display controls">
@@ -3716,7 +3688,7 @@
   </div>
 </div>
 
-<!-- Transient toast (DM Help status, etc.) -->
+<!-- Transient toast (status messages) -->
 <div id="toast" role="status" aria-live="polite"></div>
 
 <!-- Phone-only display-settings popover — lets each phone pick its own Theme / Style -->
@@ -5174,10 +5146,6 @@ function _renderTutorBlockNow(text, isReplay) {
   textContent.appendChild(block);
   _reanchorCursor();
 
-  // Reset DM Help button — hint arrived, execution complete
-  clearTimeout(_helpResetTimer);
-  if (_helpPending && !isReplay) _showToast('DM hint ready ↓');
-  _dmHelpReset();
 }
 
 // ── Inspiration award block ────────────────────────────────────────────────
@@ -6332,18 +6300,6 @@ let _currentTurnOrder = null;
 const _sfxTrack = document.getElementById('sfx-track');
 let _sfxOn = false;
 
-// ── DM Help button ──────────────────────────────────────────────────
-const _dmHelpBtn = document.getElementById('dm-help-btn');
-let _helpPending = false;
-let _helpResetTimer = null;
-
-function _dmHelpReset() {
-  _helpPending = false;
-  _dmHelpBtn.disabled = false;
-  _dmHelpBtn.classList.remove('pending', 'locked');
-  _dmHelpBtn.textContent = '◈ DM Help';
-}
-
 // Transient toast (status messages). Auto-dismisses; call again to replace.
 let _toastTimer = null;
 function _showToast(msg, ms) {
@@ -6355,47 +6311,12 @@ function _showToast(msg, ms) {
   _toastTimer = setTimeout(() => el.classList.remove('show'), ms || 3200);
 }
 
-_dmHelpBtn.addEventListener('click', async () => {
-  if (_helpPending) return;
-  _helpPending = true;
-  _dmHelpBtn.disabled = true;
-  _dmHelpBtn.classList.add('pending');
-  _dmHelpBtn.textContent = '◈ Thinking…';
-  _showToast('DM Help requested — thinking…');
-
-  try {
-    const res = await fetch('/help-request', {
-      method: 'POST',
-      headers: _dndToken ? { 'X-DND-Token': _dndToken } : {},
-    });
-    if (res.status === 409) {
-      // Another request already running
-      _dmHelpBtn.classList.remove('pending');
-      _dmHelpBtn.classList.add('locked');
-      _dmHelpBtn.textContent = '◈ Running…';
-      _showToast('A hint is already on the way…');
-      // Auto-reset when the tutor block arrives (see renderTutorBlock)
-      // Safety timeout in case it never arrives
-      clearTimeout(_helpResetTimer);
-      _helpResetTimer = setTimeout(_dmHelpReset, 20000);
-    } else if (res.status === 202) {
-      // Accepted — wait for the tutor SSE block to arrive
-      // renderTutorBlock will call _dmHelpReset()
-      clearTimeout(_helpResetTimer);
-      _helpResetTimer = setTimeout(_dmHelpReset, 20000);
-    } else {
-      _showToast('DM Help isn’t available right now');
-      _dmHelpReset();
-    }
-  } catch (_) {
-    _showToast('Couldn’t reach the server for DM Help');
-    _dmHelpReset();
-  }
-});
-
 // Read token from meta tag injected by Flask (LAN mode)
 const _dndTokenMeta = document.querySelector('meta[name="dnd-token"]');
 const _dndToken = _dndTokenMeta ? _dndTokenMeta.getAttribute('content') : null;
+// "host" only for a browser on the DM's machine; every other page is "player".
+const _dndRoleMeta = document.querySelector('meta[name="dnd-role"]');
+const _dndRole = _dndRoleMeta ? _dndRoleMeta.getAttribute('content') : 'player';
 
 // Persistent device ID — survives page refreshes, identifies this browser for DM approval
 // crypto.randomUUID() requires a secure context (HTTPS/localhost); fall back to
@@ -7365,6 +7286,10 @@ function _showDeviceRequest(dev) {
     } catch (_) {}
   }
 
+  // Approving devices is the DM's job: only the host's own browser gets the card
+  // (the server refuses /device/approve from player pages anyway).
+  if (_dndRole !== 'host') return;
+
   const card = document.createElement('div');
   card.className = 'device-card';
   card.dataset.deviceId = dev.id;
@@ -7777,7 +7702,7 @@ function _onscreenDiceOn() { try { return localStorage.getItem('dnd-onscreen-dic
     // Adopt the existing fixed-position action buttons into the rail. Because
     // they are position:fixed, Vellum (#ed-rail: display:contents) leaves them
     // exactly where they were; Editorial lays them out as a vertical column.
-    ['dm-help-btn', 'phone-mode-btn'].forEach(id => {
+    ['phone-mode-btn'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.parentElement !== rail) rail.appendChild(el);
     });

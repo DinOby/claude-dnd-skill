@@ -195,7 +195,6 @@ def _on_campaign_change() -> None:
 
 _on_campaign_change()
 
-HELP_LOCK     = rt(".help-lock")
 CAMP_FILE     = rt(".campaign")
 STATS_FILE    = rt("stats.json")
 TOKEN_FILE    = rt(".token")
@@ -256,6 +255,34 @@ except OSError as _e:   # unwritable runtime dir: keep a per-process token (scri
     print(f"[WARN] could not store the access token ({_e}); write endpoints only work from this page",
           file=sys.stderr)
     _lan_token = secrets.token_hex(32)
+
+# Two roles. The host token above (.token) belongs to the DM: the scripts send
+# it, and only pages opened on this machine (localhost) get it. Every other
+# page gets the player token, which opens the player endpoints only
+# (_token_ok); the DM endpoints need the host token *and* a loopback peer
+# address (_host_ok). Kept in the runtime dir so open player pages survive a
+# server restart.
+PLAYER_TOKEN_FILE = rt(".player_token")
+
+
+def _get_or_create_player_token() -> str:
+    try:
+        token = open(PLAYER_TOKEN_FILE, encoding="utf-8").read().strip()
+        if len(token) >= 48 and token != _lan_token:
+            return token
+    except FileNotFoundError:
+        pass
+    token = secrets.token_hex(32)
+    with open(PLAYER_TOKEN_FILE, "w", encoding="utf-8") as f:
+        f.write(token)
+    os.chmod(PLAYER_TOKEN_FILE, 0o600)
+    return token
+
+
+try:
+    _player_token: str = _get_or_create_player_token()
+except OSError:
+    _player_token = secrets.token_hex(32)
 
 
 def _local_addresses() -> "set[str]":
@@ -348,10 +375,15 @@ def _sanitize_input(text: str) -> str:
 
 
 def _char_ok(name: str, known: set) -> bool:
-    """Return True if character name is syntactically valid and in the party."""
+    """Return True if character name is syntactically valid and in the party.
+
+    No known party (stats not pushed yet) means no name is accepted: the name
+    ends up in lines the DM reads, so it must be one the DM created."""
     if not _CHAR_NAME_RE.match(name):
         return False
-    if known and name not in known and name != "Everybody":
+    if not known:
+        return False
+    if name not in known and name != "Everybody":
         return False
     return True
 
@@ -546,10 +578,31 @@ def _check_auto_trigger() -> None:
     _broadcast({"staged_inputs": {}, "queue_status": list(char_names)})
 
 
-def _token_ok() -> bool:
-    """True if the request carries the access token (required in local and LAN mode)."""
+_LOOPBACK_PEERS = ("127.0.0.1", "::1")
+
+
+def _is_local_client() -> bool:
+    """True if the TCP peer of this request is this machine.
+
+    REMOTE_ADDR is set by the server from the socket's peer address; nothing
+    in this app rewrites it (no proxy middleware), and headers such as
+    X-Forwarded-For or Host are never consulted for this decision.
+    """
+    return (request.environ.get("REMOTE_ADDR") or "") in _LOOPBACK_PEERS
+
+
+def _host_ok() -> bool:
+    """DM endpoints: the host token, sent from this machine."""
     provided = request.headers.get("X-DND-Token", "")
-    return bool(_lan_token) and hmac.compare_digest(provided, _lan_token)
+    return bool(_lan_token) and _is_local_client() and hmac.compare_digest(provided, _lan_token)
+
+
+def _token_ok() -> bool:
+    """Player endpoints: the player token (any device) — or the host's own requests."""
+    provided = request.headers.get("X-DND-Token", "")
+    if _player_token and hmac.compare_digest(provided, _player_token):
+        return True
+    return _host_ok()
 
 
 app = Flask(__name__)
@@ -1335,10 +1388,13 @@ def _broadcast_main(payload: dict) -> None:
 
 @app.route("/")
 def index():
-    # Pass LAN token to template so the browser can authenticate /help-request
+    # The page authenticates its own requests with the token of its role:
+    # host rights only for a browser on this machine (socket peer address).
+    host = _is_local_client()
     return render_template(
         "index.html",
-        lan_token=_lan_token or "",
+        lan_token=(_lan_token if host else _player_token) or "",
+        dnd_role="host" if host else "player",
         narrator_voice=_read_narrator_voice(),
         tts_available=(_tts is not None),
     )
@@ -1483,7 +1539,7 @@ def health():
 
 @app.route("/chunk", methods=["POST"])
 def chunk():
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     data = request.get_json(silent=True) or {}
     raw = data.get("text", "")
@@ -1642,7 +1698,7 @@ def stats():
     Pass replace_players=true to replace the entire player list (use on /dnd load to
     prevent stale characters from a previous campaign persisting in the sidebar).
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     data = request.get_json(silent=True) or {}
     if not data:
@@ -1871,7 +1927,7 @@ def stats():
                                         "replace_players", "sheet")):
             return "", 204
 
-    # Write active campaign name so dm_help.py always reads the current campaign.
+    # Write the active campaign name so the scripts always read the current campaign.
     # Also reload the tail buffer from the new campaign's session_tail.json so
     # display replay at /dnd load shows the correct campaign's last session.
     if "campaign" in data:
@@ -2274,7 +2330,7 @@ def vfx_trigger():
 
     Body: {"spec": "attack:Flerb"}  or  {"effect": "attack", "actor": "Flerb"}
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     if not _vfx:
         return "VFX not available", 503
@@ -2376,7 +2432,7 @@ def assets_placeholder(name):
 @app.route("/assets/changed", methods=["POST"])
 def assets_changed():
     """Tell every browser to drop its image cache (called after `assets.py generate`)."""
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     _broadcast({"assets_changed": True})
     return "", 204
@@ -2512,7 +2568,7 @@ def logbook_get():
 @app.route("/logbook/notify", methods=["POST"])
 def logbook_notify():
     """Tell every display the logbook changed (sent by push_stats.py --logbook-updated)."""
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     _broadcast({"logbook_updated": True})
     return "", 204
@@ -2607,7 +2663,7 @@ def map_post():
     Returns {"map_id", "rev", "warnings"}; 400 {"errors": [...]} when rejected
     (a rejected patch changes nothing).
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -2703,7 +2759,7 @@ def scene_post():
     Returns {"state", "warnings"}; 409 {"errors": [...]} for a transition that
     is not allowed from the current state.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -2731,7 +2787,7 @@ def clear():
 
     Called on /dnd new (fresh campaign). Ensures sidebar shows no stale characters.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     global _scene_buffer, _current_stats
     with _text_log_lock:
@@ -2748,44 +2804,6 @@ def clear():
     return "", 204
 
 
-@app.route("/help-request", methods=["POST"])
-def help_request():
-    """Spawn dm_help.py to generate and send an on-demand DM hint.
-
-    Protected by an O_EXCL lock file — concurrent requests return 409
-    so multiple players clicking the button never duplicates execution.
-    Lock is released by dm_help.py in its finally block.
-    """
-    if not _token_ok():
-        return "Forbidden", 403
-
-    # Atomic lock: O_EXCL fails if file already exists — no race condition
-    try:
-        fd = os.open(HELP_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(fd)
-    except FileExistsError:
-        return "Already running", 409
-
-    # Read active campaign name
-    try:
-        campaign = open(CAMP_FILE, encoding="utf-8").read().strip()
-    except FileNotFoundError:
-        os.unlink(HELP_LOCK)
-        return "No active campaign", 400
-
-    if not campaign:
-        os.unlink(HELP_LOCK)
-        return "No active campaign", 400
-
-    dm_help_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dm_help.py")
-    subprocess.Popen(
-        [sys.executable, dm_help_py, "--campaign", campaign],
-        close_fds=True,
-        start_new_session=True,
-    )
-    return "", 202
-
-
 @app.route("/player-input", methods=["POST"])
 def player_input():
     """Queue a player action submitted from the display companion.
@@ -2793,7 +2811,7 @@ def player_input():
     Body: {"character": "Mira", "text": "I draw my rapier", "hold": false}
     Broadcasts pending_input event to all connected browsers.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
 
     import time
@@ -2885,7 +2903,7 @@ def player_dice():
     text   = f"{character} rolls {spec}{mod_str}: {breakdown} = {total}{suffix}"
 
     payload   = {"text": text, "dice": True}
-    log_entry = {"text": text, "dice": True}
+    log_entry = {"text": text, "dice": True, "source": "player"}   # name/label typed by a player
     try:
         _camp_stamp = open(CAMP_FILE, encoding="utf-8").read().strip()
         if _camp_stamp:
@@ -2958,7 +2976,7 @@ def dice_request():
     targets every phone. No state stored — late-joining phones will not see
     requests issued before they connected.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
 
     import time
@@ -3028,7 +3046,7 @@ def dice_request_status(request_id):
     never existed (or has already fully drained) reports complete=True with
     an empty pending list — send.py --wait treats both identically.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     with _dice_pending_lock:
         entry = _dice_pending.get(request_id)
@@ -3045,7 +3063,7 @@ def dice_request_status(request_id):
 @app.route("/dice-request/<request_id>", methods=["DELETE"])
 def dice_request_cancel(request_id):
     """Cancel a pending dice request (DM gave up waiting / moved on)."""
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     with _dice_pending_lock:
         _dice_pending.pop(request_id, None)
@@ -3106,7 +3124,7 @@ def get_character_sheet(character):
 @app.route("/device/approve", methods=["POST"])
 def device_approve():
     """DM approves a pending device. Body: {"id": "<device_id>"}"""
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     device_id = str((request.get_json(force=True, silent=True) or {}).get("id", ""))
     with _devices_lock:
@@ -3121,7 +3139,7 @@ def device_approve():
 @app.route("/device/deny", methods=["POST"])
 def device_deny():
     """DM denies a pending device. Body: {"id": "<device_id>"}"""
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     device_id = str((request.get_json(force=True, silent=True) or {}).get("id", ""))
     with _devices_lock:
@@ -3290,7 +3308,7 @@ def queue_consumed():
     Token required (called from localhost by the wrapper, but checked for
     consistency).
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     with _queue_status_lock:
         _queue_status.clear()
@@ -3306,7 +3324,7 @@ def submit_now():
     right now rather than waiting for the DM's next CLI Enter press.
     Token required (DM-only action).
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     try:
         content = open(QUEUE_FILE, encoding="utf-8").read()
@@ -3381,7 +3399,7 @@ def private_message():
     Body: {"to": "Zarith", "text": "..."} → {"delivered": N}. Not written to
     the shared feed or the replay log.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     data = request.get_json(force=True, silent=True) or {}
     to = str(data.get("to", ""))[:50].strip()
@@ -3400,7 +3418,7 @@ def collect_staged_input():
     file, so actions a player typed but never confirmed are not silently
     skipped. Returns [{"character", "text", "ready"}].
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
     with _staged_lock:
         collected = [{"character": c, "text": e["text"], "ready": bool(e.get("ready"))}
@@ -3418,7 +3436,7 @@ def drain_player_input():
     Returns the drained entries as JSON, then broadcasts pending_input: [] to
     clear the indicator on all connected displays.
     """
-    if not _token_ok():
+    if not _host_ok():
         return "Forbidden", 403
 
     with _input_lock:

@@ -27,6 +27,7 @@ class TurnOrderMergeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.mod = import_app("dnd_display_app")
         cls.mod._token_ok = lambda: True
+        cls.mod._host_ok = lambda: True
         cls.client = cls.mod.app.test_client()
 
     def setUp(self):

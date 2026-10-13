@@ -353,7 +353,7 @@ def main() -> None:
     parser.add_argument("--autorun-threshold", metavar="N", type=int,
                         help="Set min players needed to auto-fire (0 or omit to reset to player count)")
     parser.add_argument("--set-campaign", metavar="NAME",
-                        help="Set the active campaign name (written to .campaign for dm_help.py). "
+                        help="Set the active campaign name (written to .campaign for the display scripts). "
                              "Server auto-resolves ruleset from the campaign's state.md.")
     parser.add_argument("--ruleset", metavar="2014|2024",
                         help="Override the ruleset badge displayed in the sidebar. "

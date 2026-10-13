@@ -74,7 +74,6 @@ If you're on Claude Code, you're in the right place.
 - <img src="skills/dnd/display/icons/location.png" height="18"> **17 scene types** — auto-detected from narration keywords — tavern, dungeon, ocean, crypt, arcane, glacier, and more
 - <img src="skills/dnd/display/icons/spellbook.png" height="18"> **Clickable character sheets** — tap any sidebar card to open a full character sheet modal (attacks, features, inventory); works on phones and tablets via LAN
 - <img src="skills/dnd/display/icons/spellbook.png" height="18"> **SRD spell/feature lookup** — click any spell or feature name in a character sheet to view its full description; bundled 5e dataset with supplemental entries for non-SRD content (Xanathar's, Tasha's, subclass features); wikidot fallback link shown for anything not in the local data
-- <img src="skills/dnd/display/icons/crystal_ball.png" height="18"> **DM Help button** — click the ◈ button on the display for an on-demand contextual hint or warning; generated from the current scene without per-turn token overhead
 - <img src="skills/dnd/display/icons/potion.png" height="18"> **Tutor / learning mode** — enable per-session for automatic hint blocks after every scene, decision point, and roll; ideal for players new to D&D
 - <img src="skills/dnd/display/icons/focus.png" height="18"> **Browser-side sound effects** — 12 SFX types synthesized on demand via numpy and played through Web Audio API; works on any device with the tab open, including phones over LAN
 - <img src="skills/dnd/display/icons/dragon.png" height="18"> **Couch co-op** — multiple characters, shared display, turn order visible to everyone in the room
@@ -435,11 +434,11 @@ python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --autorun-threshold 2  # fire 
 python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --autorun-threshold 0  # reset to player count
 ```
 
-### DM Help & Tutor Mode
+### Tutor Mode (DM Help removed)
 
 There are two ways to surface hints and warnings on the display — an on-demand button and a per-session automatic mode.
 
-**DM Help button (◈)** — a **◈ DM Help** button sits in the bottom-right corner of the display at all times. Click it and within a few seconds a contextual hint or warning is generated from the current scene and pushed to the display — no CLI command needed, no per-turn token overhead. The button reads the last 8 display blocks and current campaign state, calls Claude in non-interactive mode, and sends the result as a hint block via the normal SSE pipeline. Shows "Thinking…" while in flight; resets automatically when the block arrives. Multiple simultaneous clicks only trigger one execution.
+**DM Help button (◈)** — removed in this fork: any player could start a Claude session (with campaign secrets in its prompt) from the display. Use tutor mode below for hints.
 
 Hint blocks are **collapsed by default** — click or tap the header to expand. Warnings use an amber border:
 
@@ -456,7 +455,7 @@ Warnings use an amber border to distinguish high-stakes choices:
 
 ![Tutor warning block](screenshots/tutor-warning.png)
 
-**Tutor mode (per-session)** — for new players who want continuous guidance, enable automatic hint blocks after every scene, decision point, and roll — no button needed. Adds ~10–20% token overhead per turn. Use the DM Help button instead for on-demand hints without the ongoing cost.
+**Tutor mode (per-session)** — for new players who want continuous guidance, enable automatic hint blocks after every scene, decision point, and roll — no button needed. Adds ~10–20% token overhead per turn.
 
 ```
 /dm:dnd tutor on    # enable for this session
@@ -757,7 +756,6 @@ ${CLAUDE_SKILL_DIR}/
 │   ├── push_stats.py         # Character and combat stat updates
 │   ├── setup_tls.py          # Self-signed TLS cert generator for LAN mode
 │   ├── start-display.sh      # One-command display startup
-│   ├── dm_help.py            # On-demand DM hint generator (◈ button)
 │   ├── wrapper.py            # PTY wrapper (legacy — autorun preferred)
 │   ├── requirements.txt
 │   └── templates/

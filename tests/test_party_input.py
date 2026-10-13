@@ -27,6 +27,7 @@ class PartyInputTests(unittest.TestCase):
     def setUpClass(cls):
         cls.mod = import_app("dnd_display_app")
         cls.mod._token_ok = lambda: True
+        cls.mod._host_ok = lambda: True
         cls.mod._rate_ok = lambda addr: True
         cls.mod._device_ok = lambda device, addr: "approved"
         cls.client = cls.mod.app.test_client()

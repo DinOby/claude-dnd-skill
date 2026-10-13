@@ -105,7 +105,6 @@ to the sidebar on load.
 | `send.py` | Single pipeline for all display updates — narration, dice, NPC dialogue, stat changes, timed effects |
 | `push_stats.py` | Bulk stat pushes (party load, turn order, world time, factions) |
 | `check_input.py` | Drains the player input queue (autorun mode) — called at turn start |
-| `dm_help.py` | One-shot hint fired by the ◈ DM Help button on the display |
 | `audio.py` | Scans narration for SFX triggers; serves synthesized WAV files to browsers |
 | `index.html` | Typewriter rendering, sky canvas, particle system, CSS gradient crossfades |
 
@@ -208,9 +207,11 @@ Enable autorun:
 
 **Player Settings (phone):** each device has a Settings view with a **Text Size** stepper (per-browser font scaling, anti-FOUC), a **Narration** length slider (250–2500 words → `POST /narration-pref`, surfaced to the DM as a `[[Narration length…]]` directive), and — when the device is bound to a PC — a **Rolls** toggle that flips that character between players-roll and DM-auto-roll (`POST /roll-pref`, surfaced as a `[[<Char> roll mode: …]]` directive). See the main README's [Dice & Roll Handling](../../../README.md#dice--roll-handling).
 
-### DM Help button
+### Host and player roles
 
-The ◈ button in the top-right corner fires a one-shot hint from `dm_help.py` — a single `--tutor` block appears in the feed with a tactical suggestion for the current situation. This is separate from tutor mode (`/dnd tutor on`) which appends hints to every response.
+Every write endpoint needs a token, and there are two. The **host token** (`<runtime>/.token`) is what `send.py`, `push_stats.py`, `check_input.py` and the other scripts send; a page gets it only when the browser runs on this machine (`localhost`). Every other page gets the **player token** (`<runtime>/.player_token`). DM endpoints (`/chunk`, `/stats`, `/map`, `/scene`, `/clear`, `/vfx`, `/private`, `/dice-request`, `/device/*`, `/player-input/collect|drain|submit-now`, `/queue/consumed`, …) accept only the host token **and** only from a loopback peer address (the socket's address, never a header). Player endpoints (`/player-input/stage|ready|unstage|skip|secret|dice`, `/roll-pref`, `/narration-pref`, `/tts`, `/voice`, `/audio-toggle`, `/effects/expire`, `/character/<name>`) accept either. The page's role is in `<meta name="dnd-role">`; device approval cards appear only on the host's own page.
+
+The former ◈ DM Help button and `/help-request` (`dm_help.py`) are removed in this fork: any player could start a Claude session with campaign secrets in its prompt.
 
 ### Sound effects
 

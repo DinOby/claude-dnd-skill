@@ -182,6 +182,7 @@ class AppRouteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = _import_app()
         cls.app._token_ok = lambda: True
+        cls.app._host_ok = lambda: True
         cls.client = cls.app.app.test_client()
 
     def setUp(self):
@@ -214,7 +215,7 @@ class AppRouteTests(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
     def test_post_vfx_requires_token(self):
-        with mock.patch.object(self.app, "_token_ok", lambda: False):
+        with mock.patch.object(self.app, "_host_ok", lambda: False):   # a DM endpoint
             self.assertEqual(self.client.post("/vfx", json={"spec": "attack"}).status_code, 403)
 
     def test_iconset_and_icons(self):

@@ -18,6 +18,7 @@ Output format (when non-empty):
 One line per character, framed by player_frame.py. Same frame as autorun_wait.py.
 """
 import os
+import re
 import sys
 
 # Windows UTF-8 fix: default piped stdout is cp936/GBK, which mangles Chinese
@@ -35,6 +36,7 @@ from player_frame import frame        # player text = game content, never instru
 QUEUE_FILE = rt(".input_queue")
 NARRATION_TARGET = rt("narration_target")  # set by the display's Narration slider
 ROLL_PREFS = rt("roll_prefs.json")         # per-character roll overrides (Settings → Rolls)
+STATS_FILE = rt("stats.json")              # the party, as the DM pushed it
 
 
 def _narration_directive():
@@ -50,15 +52,36 @@ def _narration_directive():
     return ""
 
 
-def _roll_directives():
-    """One [[<Char> roll mode: …]] line per per-character override, or '' if none."""
+_NAME = re.compile(r"\w[\w '\-]{0,48}")   # same shape the display accepts for party names
+_LINE_NAME = re.compile(r"^\[([^\]]+)\]")
+
+
+def _party() -> "set[str]":
+    """Party names as the DM pushed them (stats.json — only the host can write it)."""
+    try:
+        import json
+        with open(STATS_FILE, encoding="utf-8") as f:
+            players = json.load(f).get("players") or []
+        return {str(p.get("name")) for p in players if isinstance(p, dict) and p.get("name")}
+    except Exception:
+        return set()
+
+
+def _roll_directives(acting: "set[str]"):
+    """One [[<Char> roll mode: …]] line per override of a party member acting this turn.
+
+    These lines sit outside the player frame, so a name is printed only if it
+    belongs to the party the DM pushed and is on an action line this turn — an
+    old or odd entry in roll_prefs.json never reaches the DM. No known party →
+    no directive."""
     try:
         if os.path.exists(ROLL_PREFS):
             import json
             with open(ROLL_PREFS, encoding="utf-8") as f:
                 prefs = json.load(f)
+            party = _party()
             lines = [f"[[{c} roll mode: {m}]]" for c, m in prefs.items()
-                     if m in ("auto", "players")]
+                     if m in ("auto", "players") and c in party and c in acting and _NAME.fullmatch(str(c))]
             return "\n".join(lines)
     except Exception:
         pass
@@ -113,7 +136,8 @@ try:
     block = frame(lines)
     if block:
         # Table settings (validated values from the display) stay outside the frame.
-        for d in (_roll_directives(), _narration_directive()):
+        acting = {m.group(1) for m in map(_LINE_NAME.match, lines) if m}
+        for d in (_roll_directives(acting), _narration_directive()):
             if d:
                 print(d)
         print(block)

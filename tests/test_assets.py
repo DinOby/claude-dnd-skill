@@ -295,6 +295,7 @@ class RouteTests(unittest.TestCase):
     def setUpClass(cls):
         cls.app = _import_app()
         cls.app._token_ok = lambda: True
+        cls.app._host_ok = lambda: True
         cls.client = cls.app.app.test_client()
 
     def setUp(self):
@@ -341,7 +342,7 @@ class RouteTests(unittest.TestCase):
         with mock.patch.object(self.app, "_broadcast") as bc:
             self.assertEqual(self.client.post("/assets/changed").status_code, 204)
         bc.assert_called_once_with({"assets_changed": True})
-        with mock.patch.object(self.app, "_token_ok", lambda: False):
+        with mock.patch.object(self.app, "_host_ok", lambda: False):   # a DM endpoint
             self.assertEqual(self.client.post("/assets/changed").status_code, 403)
 
     def test_stats_queue_items_without_image(self):
