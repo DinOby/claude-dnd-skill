@@ -124,9 +124,16 @@ class Library:
         lay_path = os.path.join(self.library_dir, f"{map_id}.json")
         if not os.path.isfile(lay_path):
             raise FileNotFoundError(f"no map '{map_id}' in the library")
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        dest = os.path.join(self.archive_dir, map_id, stamp)
-        os.makedirs(dest)
+        base = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        stamp, n = base, 1
+        while True:   # Windows' clock is coarse: two archives can get the same stamp
+            dest = os.path.join(self.archive_dir, map_id, stamp)
+            try:
+                os.makedirs(dest)
+                break
+            except FileExistsError:
+                n += 1
+                stamp = f"{base}-{n}"
         meta = {"id": map_id, "archived": stamp, "image": None}
         kind, entry = self.image(map_id, self.layout(map_id))
         if kind == "own" and not keep_image:
