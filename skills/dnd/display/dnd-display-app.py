@@ -2840,10 +2840,15 @@ def player_dice():
 
     data = request.get_json(force=True, silent=True) or {}
     character = re.sub(r"[`\\$]", "", str(data.get("character", "Player"))[:50]).strip() or "Player"
+    # Name and label end up in the DM's next turn (queue file): a name with a
+    # line break or brackets could fake extra lines there, so both are held to
+    # the same rules as typed actions.
+    if not _CHAR_NAME_RE.match(character):
+        return jsonify({"error": "bad character"}), 400
     spec      = str(data.get("spec", "1d20")).strip().lower()
     modifier  = int(data.get("modifier", 0) or 0)
     adv       = str(data.get("advantage", "normal")).strip().lower()
-    label     = re.sub(r"[`\\$]", "", str(data.get("label", ""))[:60]).strip()
+    label     = _sanitize_input(str(data.get("label", "")))[:60].strip()
     req_id    = str(data.get("request_id", "")).strip()[:24]
 
     m = re.fullmatch(r"(\d{1,2})d(\d{1,3})", spec)

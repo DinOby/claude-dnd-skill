@@ -6,7 +6,8 @@ writes are permitted. autorun-wait.sh fails on its `echo > .autorun-session`
 redirect; this script does the identical job (session-invalidation, countdown
 broadcast, input-queue poll, /queue/consumed POST) using python I/O only.
 
-Prints the queued player action(s) to stdout, or nothing on timeout (9 min).
+Prints the queued player action(s) to stdout — framed as game content by
+player_frame.py — or nothing on timeout (9 min).
 """
 import os
 import sys
@@ -19,6 +20,14 @@ import urllib.request
 
 DISPLAY_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(DISPLAY_DIR, "..", "scripts"))
+sys.path.insert(0, DISPLAY_DIR)
+from player_frame import frame   # player text = game content, never instructions
+
+if hasattr(sys.stdout, "reconfigure"):   # umlauts in piped output on Windows
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 PUSH = os.path.join(DISPLAY_DIR, "push_stats.py")
 
 try:
@@ -95,4 +104,4 @@ if content:
     except Exception:
         pass
 
-sys.stdout.write(content)
+sys.stdout.write(frame(content.splitlines()))
