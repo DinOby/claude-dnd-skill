@@ -256,6 +256,21 @@ def _split_paragraphs(text: str, limit: int = CHUNK_LIMIT) -> list:
     return chunks
 
 
+def _shadow_record(payload: dict) -> None:
+    """Shadow mode (engine: schatten): note the --stat-*/effect/inspiration change in the game log.
+
+    Recorded whether or not the display was reachable — the change happened in
+    the game either way. Never fails: a problem is one warning, the send goes on.
+    """
+    try:
+        from engine import shadow
+    except Exception as exc:                      # noqa: BLE001
+        print(f"⚠ Spielstand-Logbuch: Engine nicht ladbar ({exc}). Das Spiel läuft normal weiter.",
+              file=sys.stderr)
+        return
+    shadow.record(shadow.active_campaign_dir(), shadow.events_from_payload(payload), src="send")
+
+
 def _build_stats_payload(args) -> "dict | None":
     """Build a push_stats-compatible payload from --stat-* flags."""
     players: "dict[str, dict]" = {}
@@ -631,10 +646,12 @@ def main() -> None:
             body["reason"] = args.inspiration_reason.strip()
         _post(FLASK_URL, json.dumps(body).encode(), token)
         _post(STATS_URL, json.dumps({"players": [{"name": name, "inspiration": True}]}).encode(), token)
+        _shadow_record({"players": [{"name": name, "inspiration": True}]})
 
     if args.inspiration_spend:
         name = args.inspiration_spend.strip()
         _post(STATS_URL, json.dumps({"players": [{"name": name, "inspiration": False}]}).encode(), token)
+        _shadow_record({"players": [{"name": name, "inspiration": False}]})
 
     # ── Milestone award/spend (stack-based reward — system-agnostic) ─────────
     # Distinct from --inspiration-award: that one is the binary D&D 5e badge,
@@ -741,6 +758,7 @@ def main() -> None:
                   file=sys.stderr)
             sys.exit(2)
         stats_sent = _post(STATS_URL, json.dumps(stats_payload).encode("utf-8"), token)
+        _shadow_record(stats_payload)
 
     # ── Post-flight self-check ────────────────────────────────────────────────
     # Surface a clear, single-line summary if anything went sideways. Silent on

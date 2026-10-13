@@ -166,6 +166,23 @@ def _apply_figure(fig: dict, t: str, d: dict) -> None:
         fig["inspiration"] = d["value"]
     elif t == "feature.set":
         fig["resources"][d["name"]] = d["value"]
+    elif t == "currency.set":
+        coins = dict(fig.get("currency") or {"pp": 0, "gp": 0, "ep": 0, "sp": 0, "cp": 0})
+        for coin in ("pp", "gp", "ep", "sp", "cp"):
+            if coin in d:
+                coins[coin] = d[coin]
+        fig["currency"] = coins
+    elif t == "resource.set":
+        fig["resources"][_resource_key(fig["resources"], d["name"])] = {"left": d["left"], "max": d["max"]}
+
+
+def _resource_key(resources: dict, name: str) -> str:
+    """The existing key a resource name refers to: 'Rage' finds 'Rage (Kampfrausch)'."""
+    low = name.strip().lower()
+    for key in resources:
+        if key.lower() == low or key.split(" (")[0].strip().lower() == low:
+            return key
+    return name.strip()
 
 
 def replay(events: "list[dict]") -> dict:

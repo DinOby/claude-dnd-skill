@@ -160,9 +160,33 @@ def events_from_player(update: dict) -> "list[tuple[str, dict]]":
         out.append(("xp.set", data))
     if isinstance(update.get("inspiration"), bool):
         out.append(("inspiration.set", {"who": who, "value": update["inspiration"]}))
+    effect = update.get("_effect_start")
+    if isinstance(effect, dict) and effect.get("name"):
+        data = {"who": who, "name": str(effect["name"]), "conc": bool(effect.get("concentration"))}
+        duration = _duration(effect)
+        if duration:
+            data["duration"] = duration
+        out.append(("effect.start", data))
+    if update.get("_effect_end"):
+        out.append(("effect.end", {"who": who, "name": str(update["_effect_end"])}))
     if isinstance(update.get("second_wind"), bool):
         out.append(("feature.set", {"who": who, "name": "second_wind", "value": update["second_wind"]}))
     return out
+
+
+def _duration(effect: dict) -> "Optional[str]":
+    """send.py's effect dict back to the tracker's short form: 10r, 60m, 8h, indef."""
+    kind = effect.get("duration_type")
+    if kind == "rounds" and _int(effect.get("duration_remaining")) is not None:
+        return f"{_int(effect['duration_remaining'])}r"
+    seconds = _int(effect.get("duration_seconds"))
+    if kind == "minutes" and seconds is not None:
+        return f"{seconds // 60}m"
+    if kind == "hours" and seconds is not None:
+        return f"{seconds // 3600}h"
+    if kind == "indefinite":
+        return "indef"
+    return None
 
 
 def events_from_payload(payload: dict) -> "list[tuple[str, dict]]":

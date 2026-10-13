@@ -1,8 +1,11 @@
-"""sheet.py — read the numbers the engine takes over from a Markdown character sheet.
+"""sheet.py — read (and, for game.py bogen, change) the engine's numbers in a Markdown sheet.
 
 Only the values listed in docs/plans/spielzustand-engine.md ("Werte und ihre
 Quelle") are read; everything else stays Markdown. A value the sheet does not
 state is left out (None), never guessed — the import table shows it as "–".
+
+change() rewrites exactly the lines that hold those values and nothing else;
+a line it cannot find is an error, never a guess.
 
 Sheet format: templates/character-sheet.md ("## Combat Stats", "## Spell Slots",
 "## Equipment & Inventory", "**Currency:** 40gp 11sp 4cp", …).
@@ -101,8 +104,15 @@ def _currency(section: str) -> Optional[dict]:
     return coins if found else None
 
 
+_INSPIRATION_LINE = re.compile(r"^(\s*-\s+\*\*(?:Heroic\s+)?Inspiration:\*\*\s*)(\S+)", re.IGNORECASE | re.MULTILINE)
+
+
 def _inspiration(text: str) -> bool:
-    """True when a line names (Heroic) Inspiration with a check mark."""
+    """The '**Heroic Inspiration:** ja|nein' line under Combat Stats when there is one
+    (game.py bogen writes it); otherwise any line naming Inspiration with a check mark."""
+    m = _INSPIRATION_LINE.search(_section(text, "Combat Stats"))
+    if m:
+        return m.group(2).strip().lower() in ("ja", "✓", "yes", "true")
     return any("inspiration" in line.lower() and "✓" in line for line in text.splitlines())
 
 
@@ -118,3 +128,118 @@ def _resources(section: str) -> dict:
             left, total = uses[-1]
             out[m.group(1).strip()] = {"left": int(left), "max": int(total)}
     return out
+
+
+# ── changing a sheet (game.py bogen) ────────────────────────────────────────
+
+class SheetError(Exception):
+    """A requested change has no line to go to (the message says which)."""
+
+
+def _section_span(text: str, title: str) -> "tuple[int, int]":
+    """(start, end) of the body of '## <title>…' in text; SheetError when missing."""
+    m = re.search(rf"^##[ \t]+{re.escape(title)}[^\n]*\n", text, re.MULTILINE)
+    if not m:
+        raise SheetError(f"Abschnitt '## {title}' fehlt im Bogen")
+    end = re.search(r"^##[ \t]", text[m.end():], re.MULTILINE)
+    return m.end(), (m.end() + end.start()) if end else len(text)
+
+
+def _sub_in_section(text: str, title: str, pattern: str, repl, what: str, flags=re.MULTILINE) -> str:
+    start, end = _section_span(text, title)
+    body, n = re.subn(pattern, repl, text[start:end], count=1, flags=flags)
+    if not n:
+        raise SheetError(f"{what} nicht im Abschnitt '## {title}' gefunden")
+    return text[:start] + body + text[end:]
+
+
+def _coins_text(coins: dict) -> str:
+    parts = [f"{coins[c]}{c}" for c in ("pp", "ep") if coins.get(c)]
+    parts += [f"{coins.get(c, 0)}{c}" for c in ("gp", "sp", "cp")]
+    return " ".join(parts)
+
+
+def change(text: str, *, hp: Optional[int] = None, hp_max: Optional[int] = None,
+           temp: Optional[int] = None, currency: Optional[dict] = None,
+           resources: Optional[dict] = None, inspiration: Optional[bool] = None,
+           add: "tuple[str, ...]" = (), remove: "tuple[str, ...]" = (),
+           hit_dice: Optional[int] = None, slots: Optional[dict] = None) -> str:
+    """The sheet with the given values changed. Raises SheetError, never half-changes."""
+    if hp is not None or hp_max is not None:
+        def _hp(m):
+            cur = hp if hp is not None else int(m.group(2))
+            mx = hp_max if hp_max is not None else int(m.group(3))
+            return f"{m.group(1)}{cur} / {mx}"
+        text = _sub_in_section(text, "Combat Stats", r"(\*\*HP:\*\*\s*)(\d+)\s*/\s*(\d+)", _hp, "Die TP-Zeile")
+    if temp is not None:
+        text = _sub_in_section(text, "Combat Stats", r"(\*\*Temp HP:\*\*\s*)\d+",
+                               lambda m: f"{m.group(1)}{temp}", "'**Temp HP:**'")
+    if hit_dice is not None:
+        text = _sub_in_section(text, "Combat Stats", r"(\*\*Hit Dice:\*\*\s*\d+\s*d\d+\s*\(remaining:\s*)\d+",
+                               lambda m: f"{m.group(1)}{hit_dice}", "Die Trefferwürfel-Zeile")
+    if inspiration is not None:
+        value = "ja" if inspiration else "nein"
+        start, end = _section_span(text, "Combat Stats")
+        body = text[start:end]
+        if _INSPIRATION_LINE.search(body):
+            body = _INSPIRATION_LINE.sub(lambda m: f"{m.group(1)}{value}", body, count=1)
+        else:
+            hp_line = re.search(r"^.*\*\*HP:\*\*.*$", body, re.MULTILINE)
+            if not hp_line:
+                raise SheetError("Die TP-Zeile fehlt – wohin mit der Inspiration?")
+            body = body[:hp_line.end()] + f"\n- **Heroic Inspiration:** {value}" + body[hp_line.end():]
+        text = text[:start] + body + text[end:]
+    for name, (left, total) in (resources or {}).items():
+        low = name.strip().lower()
+        start, end = _section_span(text, "Features & Traits")
+        lines = text[start:end].split("\n")
+        for i, line in enumerate(lines):
+            m = re.match(r"^\s*-\s+\*\*(.+?)\*\*", line)
+            if not m:
+                continue
+            key = m.group(1).strip().lower()
+            if key != low and key.split(" (")[0].strip() != low:
+                continue
+            spans = list(re.finditer(r"(\*\*(?:[^*\d]*?:\s*)?)(\d+)\s*/\s*(\d+)(\*\*)", line))
+            if not spans:
+                raise SheetError(f"'{name}' hat im Bogen keinen Zähler wie **1/2**")
+            s = spans[-1]
+            lines[i] = line[:s.start()] + f"{s.group(1)}{left}/{total}{s.group(4)}" + line[s.end():]
+            break
+        else:
+            raise SheetError(f"Fähigkeit '{name}' nicht unter '## Features & Traits' gefunden")
+        text = text[:start] + "\n".join(lines) + text[end:]
+    for level, used in (slots or {}).items():
+        text = _sub_in_section(
+            text, "Spell Slots",
+            rf"^(\|\s*{int(level)}(?:st|nd|rd|th|\.)?\s*\|\s*(\d+)\s*\|\s*)\d*(\s*\|)",
+            lambda m: f"{m.group(1)}{used}{m.group(3)}", f"Zauberplatz-Zeile Grad {level}")
+    for item in remove:
+        start, end = _section_span(text, "Equipment & Inventory")
+        lines = text[start:end].split("\n")
+        hit = [i for i, line in enumerate(lines)
+               if re.match(r"^\s*-\s+(.+?)\s*$", line)
+               and re.match(r"^\s*-\s+(.+?)\s*$", line).group(1).lower() == item.strip().lower()]
+        if not hit:
+            raise SheetError(f"Gegenstand '{item}' steht nicht im Inventar (genauer Wortlaut nötig)")
+        del lines[hit[0]]
+        text = text[:start] + "\n".join(lines) + text[end:]
+    if add:
+        start, end = _section_span(text, "Equipment & Inventory")
+        body = text[start:end]
+        new_lines = "".join(f"- {item.strip()}\n" for item in add)
+        head = re.search(r"^\*\*Neu erhalten:\*\*\s*\n", body, re.MULTILINE)
+        if head:
+            pos = head.end()
+            while pos < len(body) and re.match(r"^\s*-\s+", body[pos:]):
+                pos = body.find("\n", pos) + 1 or len(body)
+            body = body[:pos] + new_lines + body[pos:]
+        else:
+            cur = re.search(r"^\*\*Currency:\*\*", body, re.MULTILINE)
+            block = f"**Neu erhalten:**\n{new_lines}\n"
+            body = body[:cur.start()] + block + body[cur.start():] if cur else body.rstrip("\n") + "\n\n" + block
+        text = text[:start] + body + text[end:]
+    if currency is not None:
+        text = _sub_in_section(text, "Equipment & Inventory", r"(\*\*Currency:\*\*)[^\n]*",
+                               lambda m: f"{m.group(1)} {_coins_text(currency)}", "'**Currency:**'")
+    return text

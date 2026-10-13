@@ -184,27 +184,60 @@ def rebuild(campaign_dir) -> dict:
 
 # ── comparison ──────────────────────────────────────────────────────────────
 
-def compare(engine: dict, markdown: dict) -> "list[tuple[str, str, str, str]]":
-    """(character, value, engine says, Markdown says) for every difference."""
+SHEET_SIDE_SOURCES = ("game", "bogen", "xp", "tracker")
+"""Writers that change the Markdown side (sheets, tracker.json) and log it in the same step.
+The display paths (push_stats, send) only change the display, never a sheet."""
+
+HAND = "von Hand geändert"
+NOT_FOLLOWED = "Bogen nicht nachgezogen"
+
+
+def sheet_baseline(events: "list[dict]") -> dict:
+    """What the sheets should say if only logged writers touched them: the last import plus
+    every later event from a writer that also changes the Markdown side."""
+    return st.replay([e for e in events if e["src"] in SHEET_SIDE_SOURCES or e["type"] == "import"])
+
+
+def _items(fig: dict) -> "list[str]":
+    return sorted(i.lower() for items in (fig.get("inventory") or {}).values() for i in items)
+
+
+def compare(engine: dict, markdown: dict, baseline: Optional[dict] = None) -> "list[tuple]":
+    """(character, value, engine says, Markdown says[, cause]) for every difference.
+
+    With a baseline (sheet_baseline()['characters']) each difference gets a cause:
+    "von Hand geändert" — the sheet no longer says what the logged writers left there;
+    "Bogen nicht nachgezogen" — the sheet is as logged, the engine moved on (a display
+    change that was not written into the sheet).
+    """
     diffs = []
+
+    def cause(base_value, sheet_value, base_fig) -> "tuple":
+        if baseline is None:
+            return ()
+        if base_fig is None:
+            return (HAND,)
+        return (HAND if base_value != sheet_value else NOT_FOLLOWED,)
+
     for name in sorted(set(engine) | set(markdown)):
         e, m = engine.get(name), markdown.get(name)
         if e is None:
-            diffs.append((name, "Figur", "fehlt", "vorhanden"))
+            diffs.append((name, "Figur", "fehlt", "vorhanden") + ((HAND,) if baseline is not None else ()))
             continue
         if m is None:
-            diffs.append((name, "Figur", "vorhanden", "fehlt"))
+            diffs.append((name, "Figur", "vorhanden", "fehlt") + ((HAND,) if baseline is not None else ()))
             continue
+        base = (baseline or {}).get(name)
         for label, get in ROWS:
             if label == "Inventar (Einträge)":
                 continue
             a, b = get(e), get(m)
             if a != b:
-                diffs.append((name, label, str(a), str(b)))
-        inv_e = sorted(i.lower() for items in (e.get("inventory") or {}).values() for i in items)
-        inv_m = sorted(i.lower() for items in (m.get("inventory") or {}).values() for i in items)
+                diffs.append((name, label, str(a), str(b)) + cause(get(base) if base else None, b, base))
+        inv_e, inv_m = _items(e), _items(m)
         if inv_e != inv_m:
             only_e = len([i for i in inv_e if i not in inv_m])
             only_m = len([i for i in inv_m if i not in inv_e])
-            diffs.append((name, "Inventar", f"{only_e} nur in Engine", f"{only_m} nur im Bogen"))
+            diffs.append((name, "Inventar", f"{only_e} nur in Engine", f"{only_m} nur im Bogen")
+                         + cause(_items(base) if base else None, inv_m, base))
     return diffs

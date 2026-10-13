@@ -179,7 +179,41 @@ Logbuchs bleibt nutzbar. `game.py pruefen` listet alle solchen Zeilen.
   ein Abend im Schattenbetrieb, dann deine Entscheidung über S3.
 - **Kosten:** 0 €. Abo: leicht höher (Abgleich beim Laden).
 
-### S3 – TP, Zustände, Zauberplätze, Trefferwürfel, RK aus der Engine
+**Ergebnis des Spielabends nach S2 (13.10.2026):** 43 Einträge, keine kaputte
+Zeile, aber 8 Abweichungen. Alle kamen über Wege, die das Logbuch nicht sah:
+`send.py --stat-*`/`--effect-*`/`--inspiration-*` und direkte Änderungen an den
+Bögen (TP, Geld, begrenzte Fähigkeiten, Inspiration, Inventar). Deshalb wird S3
+geteilt.
+
+### S3a – Alle Änderungswege anschließen (Engine hört weiter nur zu)
+
+- **Gefundene Änderungswege:** `push_stats.py` ✓ (S1) · `tracker.py` ✓ (S1) ·
+  `xp.py` ✓ (S1) · `send.py --stat-hp/--stat-temp-hp/--stat-slot-use/
+  --stat-slot-restore/--stat-condition-add/--stat-condition-remove/
+  --stat-concentrate/--stat-inventory-add/--stat-inventory-remove` ✗ ·
+  `send.py --effect-start/--effect-end` ✗ · `send.py --inspiration-award/
+  --inspiration-spend` ✗ · direkte Änderungen an den Bögen ✗. Keine Werte ändern:
+  `combat.py`, `character.py` (rechnet nur), Würfel, Kalender, Reisen, Karten,
+  Bilder; das Display nimmt Wertänderungen nur vom Host an.
+- **Ändert:** `send.py` schreibt alle Wert-Flags mit (Quelle `send`, auch wenn
+  das Display aus ist). Neu `game.py bogen FIGUR --tp --temp --muenzen
+  --ressource --inspiration --plus --minus --trefferwuerfel --platz`: ändert
+  genau die betroffenen Zeilen im Bogen und schreibt dieselbe Änderung ins
+  Logbuch (Quelle `bogen`); eine Zeile, die es nicht findet, ist ein Fehler –
+  dann wird nichts geändert. Neue Ereignisse `currency.set` und
+  `resource.set`. Inspiration steht im Bogen künftig als eigene Zeile
+  `- **Heroic Inspiration:** ja|nein` unter Combat Stats.
+- **Abgleich mit Ursache:** Jede Abweichung bekommt eine Ursache. „von Hand
+  geändert“: Der Bogen sagt etwas anderes, als die mitschreibenden
+  Bogen-Schreiber (Import, `bogen`, `xp.py`, `tracker.py`) dort hinterlassen
+  haben. „Bogen nicht nachgezogen“: Der Bogen ist wie protokolliert, nur die
+  Anzeige wurde geändert (`send.py`/`push_stats.py`).
+- **Regel für den Spielabend:** Jede Wertänderung am Bogen über `game.py bogen`;
+  Anzeige wie bisher über `send.py`. Ziel: Abgleich mit 0 Abweichungen.
+- **Spielabend danach:** ja, Schattenbetrieb. **Danach Stopp** bis zum OK für S3b.
+- **Kosten:** 0 €. Abo: leicht höher (ein Aufruf mehr pro Bogenänderung).
+
+### S3b – TP, Zustände, Zauberplätze, Trefferwürfel, RK aus der Engine
 
 - **Ändert:** Diese Werte nur noch per `game.py`; Display liest aus der Engine;
   Block im Bogen; Regel in `SKILL.md`; `tracker.json` wird abgelöst;
@@ -261,6 +295,20 @@ erzeugter Block bleibt stabil und Handänderungen werden gemeldet.
 - Nur Logbuch ohne Momentaufnahme: jeder Start langsam und fehleranfällig.
 - Markdown bleibt Quelle: Auslesen brüchig, Fehlerquelle aus Sitzung 1.
 - Alles auf einmal: zwischendurch kein spielbarer Stand.
+
+## Tischregeln, die die Engine später kennen muss
+
+- **Natürliche 1 und 20 (Hausregel seit 13.10.2026):** Bei *jedem* W20-Wurf
+  (Angriff, Fertigkeit, Rettungswurf, Spieler wie NSC) ist eine natürliche 1 ein
+  kritischer Fehlschlag und eine natürliche 20 ein kritischer Erfolg, egal wie
+  hoch Bonus und SG sind – jeweils mit spürbarer Folge in der Erzählung. Bei
+  Angriffen bleibt die 20 zusätzlich ein kritischer Treffer (doppelte
+  Schadenswürfel). Bei Vorteil/Nachteil zählt nur der behaltene Würfel. Eine 20
+  eines Spielercharakters gibt Heroic Inspiration, falls er noch keine hat. Die
+  Kampf-Engine (S5, Phase 3b) und jedes Rundenpaket müssen das als Schalter pro
+  Kampagne abbilden (Standard aus = offizielle Regel).
+- **Würfe vor der nächsten Runde:** Ein angeforderter Wurf wird im selben Zug
+  ausgewertet, erst danach werden neue Aktionen gesammelt (Rundenpaket S6).
 
 ## Offene Punkte (nicht Teil dieses Plans)
 

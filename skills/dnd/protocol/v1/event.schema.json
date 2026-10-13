@@ -9,7 +9,7 @@
     "seq":  {"type": "integer", "minimum": 1},
     "t":    {"type": "string", "maxLength": 40},
     "by":   {"type": "string", "maxLength": 64},
-    "src":  {"type": "string", "enum": ["game", "push_stats", "tracker", "xp", "test"]},
+    "src":  {"type": "string", "enum": ["game", "push_stats", "tracker", "xp", "send", "bogen", "test"]},
     "type": {"type": "string", "enum": [
       "hp.set", "hp.temp",
       "condition.set", "condition.add", "condition.remove", "condition.clear",
@@ -21,6 +21,7 @@
       "inventory.add", "inventory.remove",
       "xp.set", "xp.award",
       "inspiration.set", "feature.set",
+      "currency.set", "resource.set",
       "turn.order", "turn.current", "turn.round", "turn.clear",
       "tracker.clear",
       "import"
@@ -54,6 +55,8 @@
     "turn.current":      {"type": "object", "required": ["who"], "properties": {"who": {"type": "string"}, "round": {"type": "integer", "minimum": 0}}},
     "turn.round":        {"type": "object", "required": ["round"], "properties": {"round": {"type": "integer", "minimum": 0}}},
     "turn.clear":        {"type": "object", "properties": {}},
+    "currency.set":      {"type": "object", "required": ["who"], "properties": {"who": {"type": "string"}, "pp": {"type": "integer", "minimum": 0}, "gp": {"type": "integer", "minimum": 0}, "ep": {"type": "integer", "minimum": 0}, "sp": {"type": "integer", "minimum": 0}, "cp": {"type": "integer", "minimum": 0}}},
+    "resource.set":      {"type": "object", "required": ["who", "name", "left", "max"], "properties": {"who": {"type": "string"}, "name": {"type": "string"}, "left": {"type": "integer", "minimum": 0}, "max": {"type": "integer", "minimum": 0}}},
     "tracker.clear":     {"type": "object", "properties": {"all": {"type": "boolean"}}},
     "import":            {"type": "object", "required": ["source", "characters"], "properties": {"source": {"type": "string"}, "characters": {"type": "object"}}}
   }
