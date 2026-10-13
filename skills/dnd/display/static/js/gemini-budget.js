@@ -49,9 +49,18 @@
 
   function show(status) {
     if (!status || !ensureRow()) return;
-    label.textContent = euro(status.spent_eur) + ' / ' + euro(status.limit_eur).replace(',00 €', ' €');
-    label.style.color = status.exhausted ? '#d9534f' : '';
+    const warn = !!status.warning && !status.exhausted;   // 80 % of the limit by default
+    label.textContent = (warn || status.exhausted ? '⚠ ' : '') +
+      euro(status.spent_eur) + ' / ' + euro(status.limit_eur).replace(',00 €', ' €');
+    label.style.color = status.exhausted ? '#d9534f' : warn ? '#e0a030' : '';
     row.dataset.exhausted = status.exhausted ? 'true' : 'false';
+    row.dataset.warning = warn ? 'true' : 'false';
+    const pct = Math.round((status.warn_ratio || 0.8) * 100);
+    row.title = status.exhausted
+      ? 'Gemini-Budget erreicht: keine neuen Bilder, Vorlesen mit der Browser-Stimme.'
+      : warn
+        ? 'Achtung: ' + pct + ' % des Gemini-Budgets in diesem Monat verbraucht.'
+        : 'Gemini-Kosten in diesem Monat (Bilder + Vorlesen).';
   }
 
   function refresh() {

@@ -17,12 +17,23 @@ prices are counted 1:1 as EUR, which over-counts slightly. The ledger is
 new month starts at 0 by itself. The display process (narration) and
 scripts/assets.py (images) share it through a lock file.
 
-Status for the DM:   python3 gemini_budget.py
+Status for the DM:   python3 gemini_budget.py [status]
+Change the limit:    python3 gemini_budget.py set-limit 15 [--this-month]
+
+set-limit is command-line only on purpose: no web route or button calls it,
+and it must never go into a permission allowlist, so Claude Code asks the DM
+before every change. It refuses a limit below this month's spending and above
+max_settable_limit_eur (100 €) — higher only by editing the config by hand.
+Without --this-month the limit is written to the user override
+<data-root>/config/gemini-budget.json; with it, the ledger holds a limit for
+the current month only, and the next month is back on the standing limit.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -43,11 +54,21 @@ class BudgetExceeded(Exception):
     """The call would pass this month's Gemini limit; the message says so in plain words."""
 
 
+class LimitRefused(ValueError):
+    """set-limit said no; the message says why and what to do."""
+
+
 def _validate(cfg: dict) -> "list[str]":
     problems = []
     limit = cfg.get("monthly_limit_eur")
     if not isinstance(limit, (int, float)) or limit < 0:
         problems.append("monthly_limit_eur must be a number ≥ 0")
+    cap = cfg.get("max_settable_limit_eur", 100)
+    if not isinstance(cap, (int, float)) or cap < 0:
+        problems.append("max_settable_limit_eur must be a number ≥ 0")
+    ratio = cfg.get("warn_ratio", 0.8)
+    if not isinstance(ratio, (int, float)) or not 0 < ratio <= 1:
+        problems.append("warn_ratio must be a number in (0, 1]")
     prices = cfg.get("image_price_usd")
     if not isinstance(prices, dict) or not isinstance(prices.get("default"), (int, float)):
         problems.append("image_price_usd needs a numeric 'default'")
@@ -101,7 +122,17 @@ class Budget:
     # ── prices ────────────────────────────────────────────────────────────────
 
     def limit_eur(self) -> float:
+        """The standing monthly limit from the config (a month may override it)."""
         return float(self.config.get().get("monthly_limit_eur", 0))
+
+    def max_settable_eur(self) -> float:
+        return float(self.config.get().get("max_settable_limit_eur", 100))
+
+    def _month_limit(self, m: dict) -> "tuple[float, str]":
+        override = m.get("limit_override_eur")
+        if isinstance(override, (int, float)) and not isinstance(override, bool):
+            return float(override), "this-month"
+        return self.limit_eur(), "config"
 
     def image_cost(self, model: Optional[str]) -> float:
         prices = self.config.get()["image_price_usd"]
@@ -158,11 +189,15 @@ class Budget:
         month = self._month()
         with self._lock():
             m = self._read()["months"].get(month, {})
-        spent, limit = round(float(m.get("eur", 0.0)), 4), self.limit_eur()
-        return {"month": month, "spent_eur": spent, "limit_eur": limit,
+        spent = round(float(m.get("eur", 0.0)), 4)
+        limit, source = self._month_limit(m)
+        ratio = float(self.config.get().get("warn_ratio", 0.8))
+        return {"month": month, "spent_eur": spent, "limit_eur": limit, "limit_source": source,
+                "standard_limit_eur": self.limit_eur(),
                 "remaining_eur": round(max(0.0, limit - spent), 4),
                 "images": int(m.get("images", 0)), "tts_calls": int(m.get("tts_calls", 0)),
                 "tts_seconds": round(float(m.get("tts_seconds", 0.0)), 1),
+                "warn_ratio": ratio, "warning": spent >= ratio * limit,
                 "exhausted": spent >= limit}
 
     def check(self, cost_eur: float) -> None:
@@ -192,20 +227,128 @@ class Budget:
         return self.status()
 
 
-def _cli() -> int:
-    s = Budget().status()
-    print(f"Gemini {s['month']}: {s['spent_eur']:.2f} € von {s['limit_eur']:.2f} € "
-          f"(übrig {s['remaining_eur']:.2f} €) · {s['images']} Bilder · "
+    def set_limit(self, amount: float, this_month: bool = False) -> dict:
+        """Change the limit — permanently (user config) or for this month only.
+        Returns {"old", "new", "scope", "month", "where", "note"}; LimitRefused otherwise."""
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)) or not math.isfinite(amount):
+            raise LimitRefused("Die Grenze muss eine Zahl sein, z. B. 15 oder 12,50.")
+        amount = round(float(amount), 2)
+        if amount < 0:
+            raise LimitRefused("Die Grenze kann nicht negativ sein.")
+        cap = self.max_settable_eur()
+        if amount > cap:
+            raise LimitRefused(
+                f"{_euro(amount)} liegt über der Obergrenze von {_euro(cap)} für diesen Befehl. "
+                f"Höher geht es nur, indem du {self.config.user_path} von Hand bearbeitest "
+                f'("monthly_limit_eur").')
+        month = self._month()
+        with self._lock():
+            data = self._read()
+            m = data["months"].get(month, {})
+            spent = round(float(m.get("eur", 0.0)), 4)
+            if amount < spent:
+                raise LimitRefused(
+                    f"{_euro(amount)} liegt unter dem, was im {month} schon verbucht ist "
+                    f"({_euro(spent)}). Wähle mindestens {_euro(math.ceil(spent * 100) / 100)}.")
+            month_limit, source = self._month_limit(m)
+            note = ""
+            if this_month:
+                old = month_limit
+                entry = data["months"].setdefault(month, {"eur": 0.0, "images": 0, "tts_calls": 0,
+                                                          "tts_seconds": 0.0})
+                entry["limit_override_eur"] = amount
+                data["log"].append({"t": self._now().isoformat(timespec="seconds"), "kind": "limit",
+                                    "eur": 0.0, "detail": f"{month}: {old:.2f} -> {amount:.2f}"})
+                data["log"] = data["log"][-LOG_KEEP:]
+                self._write(data)
+                where = self.ledger_path
+            else:
+                old = self.limit_eur()
+                self._write_user_limit(amount)
+                where = self.config.user_path
+                if source == "this-month":
+                    note = (f"Für {month} gilt weiterhin die Monatsgrenze von {_euro(month_limit)}; "
+                            f"die neue Grenze gilt ab dem nächsten Monat.")
+        return {"old": old, "new": amount, "scope": "this-month" if this_month else "permanent",
+                "month": month, "where": where, "note": note}
+
+    def _write_user_limit(self, amount: float) -> None:
+        """Set monthly_limit_eur in the user override, keeping its other keys."""
+        path = self.config.user_path
+        current: dict = {}
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    current = json.load(f)
+            except (OSError, ValueError) as e:
+                raise LimitRefused(f"{path} ist nicht lesbar ({e}) — bitte von Hand reparieren.") from None
+            if not isinstance(current, dict):
+                raise LimitRefused(f"{path} ist kein JSON-Objekt — bitte von Hand reparieren.")
+        current["monthly_limit_eur"] = amount
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(current, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+
+
+def _euro(value: float) -> str:
+    return f"{value:.2f} €".replace(".", ",")
+
+
+def _parse_amount(text: str) -> float:
+    try:
+        value = float(text.strip().replace("€", "").replace(",", "."))
+    except ValueError:
+        raise LimitRefused(f"'{text}' ist kein Betrag. Beispiel: set-limit 15  oder  set-limit 12,50") from None
+    if not math.isfinite(value):
+        raise LimitRefused(f"'{text}' ist kein Betrag.")
+    return value
+
+
+def _print_status(s: dict) -> None:
+    scope = " (nur dieser Monat)" if s["limit_source"] == "this-month" else ""
+    print(f"Gemini {s['month']}: {_euro(s['spent_eur'])} von {_euro(s['limit_eur'])}{scope} "
+          f"(übrig {_euro(s['remaining_eur'])}) · {s['images']} Bilder · "
           f"{s['tts_calls']} Vorlese-Blöcke, {s['tts_seconds'] / 60:.1f} Min.")
     if s["exhausted"]:
         print("Budget erreicht — keine neuen Bilder; Vorlesen nutzt die Browser-Stimme.")
+    elif s["warning"]:
+        print(f"⚠ Achtung: {round(s['warn_ratio'] * 100)} % des Gemini-Budgets sind verbraucht.")
+
+
+def _cli(argv: "Optional[list[str]]" = None, budget: Optional[Budget] = None) -> int:
+    parser = argparse.ArgumentParser(prog="gemini_budget.py",
+                                     description="Monatliche Gemini-Grenze: Stand anzeigen oder ändern.")
+    sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("status", help="Stand dieses Monats (Standard)")
+    sl = sub.add_parser("set-limit", help="Monatsgrenze ändern (nur hier, nie über den Browser)")
+    sl.add_argument("amount", help="neue Grenze in Euro, z. B. 15 oder 12,50")
+    sl.add_argument("--this-month", action="store_true",
+                    help="nur für den laufenden Monat; am Monatsersten gilt wieder die Standardgrenze")
+    args = parser.parse_args(argv)
+    budget = budget or Budget()
+    try:
+        if args.cmd == "set-limit":
+            result = budget.set_limit(_parse_amount(args.amount), this_month=args.this_month)
+            scope = f"nur für {result['month']}" if result["scope"] == "this-month" else "dauerhaft"
+            print(f"Gemini-Grenze geändert ({scope}): {_euro(result['old'])} → {_euro(result['new'])}")
+            print(f"Gespeichert in: {result['where']}")
+            if result["note"]:
+                print(result["note"])
+        _print_status(budget.status())
+    except (LimitRefused, BudgetExceeded, TimeoutError) as e:
+        print(f"Abgelehnt: {e}", file=sys.stderr)
+        return 1
     return 0
 
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
     sys.exit(_cli())

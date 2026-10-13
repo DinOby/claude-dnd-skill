@@ -525,10 +525,14 @@ Categories: `weapon armor potion scroll ring wand wondrous tool gear pc npc enem
 **Monthly Gemini budget — `display/gemini_budget.py`.** Images (`generate`, `seed`) and narration (the display's `/tts`) share one hard cap per calendar month, default **10 €** (`display/config/gemini-budget.json`, override `{"monthly_limit_eur": N}` in `<data-root>/config/gemini-budget.json`). Before each paid call the cap is checked; once it would be passed, `generate`/`seed` stop and report the rest as *blocked* (they stay on the wait-list, no attempt used), and narration falls back to the browser's own voice (free). The display shows the month's total in Settings → "Gemini (Monat)". Ledger: `<runtime>/gemini-ledger.json`.
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/display/gemini_budget.py   # "Gemini 2026-10: 3.40 € von 10.00 € …"
+python3 ${CLAUDE_SKILL_DIR}/display/gemini_budget.py                            # status: "Gemini 2026-10: 3,40 € von 10,00 € …"
+python3 ${CLAUDE_SKILL_DIR}/display/gemini_budget.py set-limit 15               # standing limit → <data-root>/config/gemini-budget.json
+python3 ${CLAUDE_SKILL_DIR}/display/gemini_budget.py set-limit 12,50 --this-month   # this month only; back to the standing limit on the 1st
 ```
 
-Run it before offering an image batch and include the remaining budget in the cost question. A *blocked* batch with "Monatsbudget erreicht" is final for this month — tell the DM, do not retry or raise the limit yourself.
+Run the status before offering an image batch and include the remaining budget in the cost question. From 80 % of the limit (`warn_ratio`) the status prints a warning and Settings shows the amount with ⚠ in amber. A *blocked* batch with "Monatsbudget erreicht" is final for this month — tell the DM, do not retry.
+
+**`set-limit` — only when the DM explicitly asks for a new limit, and only from the command line.** It prints the old and the new limit, refuses a value below what this month has already booked, and refuses more than `max_settable_limit_eur` (100 €); higher is possible only by the DM editing `<data-root>/config/gemini-budget.json` by hand — never edit that file yourself to get around the cap. No web route or button can change the limit. **Never add it to a permission allowlist** (`settings.json` / `settings.local.json`): Claude Code must ask the DM before every change. Never raise the limit on your own because a batch was blocked.
 
 ---
 

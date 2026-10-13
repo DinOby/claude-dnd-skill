@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -111,6 +113,121 @@ class LedgerTests(_BudgetCase):
         data = json.loads(self.ledger.read_text(encoding="utf-8"))
         self.assertEqual(len(data["log"]), gb.LOG_KEEP)
         self.assertEqual(data["log"][-1]["detail"], str(gb.LOG_KEEP + 19))
+
+
+class SetLimitTests(_BudgetCase):
+    def test_permanent_change_goes_to_the_user_config(self):
+        (self.user_cfg / "gemini-budget.json").write_text(json.dumps({"warn_ratio": 0.9}), encoding="utf-8")
+        result = self.budget.set_limit(15)
+        self.assertEqual((result["old"], result["new"], result["scope"]), (10.0, 15.0, "permanent"))
+        saved = json.loads((self.user_cfg / "gemini-budget.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved, {"warn_ratio": 0.9, "monthly_limit_eur": 15.0})   # other keys kept
+        self.assertEqual(self.budget.status()["limit_eur"], 15.0)
+        self.now = NOV
+        self.assertEqual(self.budget.status()["limit_eur"], 15.0)
+
+    def test_this_month_only_falls_back_on_the_first(self):
+        result = self.budget.set_limit(12.5, this_month=True)
+        self.assertEqual((result["old"], result["new"], result["scope"]), (10.0, 12.5, "this-month"))
+        s = self.budget.status()
+        self.assertEqual((s["limit_eur"], s["limit_source"], s["standard_limit_eur"]), (12.5, "this-month", 10.0))
+        self.budget.check(12.0)                         # the raised limit is the one enforced
+        self.assertFalse((self.user_cfg / "gemini-budget.json").exists())
+        self.now = NOV
+        s = self.budget.status()
+        self.assertEqual((s["limit_eur"], s["limit_source"]), (10.0, "config"))
+
+    def test_permanent_change_does_not_override_this_months_limit(self):
+        self.budget.set_limit(12.5, this_month=True)
+        result = self.budget.set_limit(20)
+        self.assertEqual(result["old"], 10.0)
+        self.assertIn("ab dem nächsten Monat", result["note"])
+        self.assertEqual(self.budget.status()["limit_eur"], 12.5)
+        self.now = NOV
+        self.assertEqual(self.budget.status()["limit_eur"], 20.0)
+
+    def test_below_spending_is_refused(self):
+        self.budget.charge("image", 6.004)
+        for this_month in (False, True):
+            with self.assertRaises(gb.LimitRefused, msg=this_month) as cm:
+                self.budget.set_limit(5.99, this_month=this_month)
+            self.assertIn("6,01 €", str(cm.exception))      # the smallest allowed value, rounded up
+        self.budget.set_limit(6.01, this_month=True)
+
+    def test_cap_only_by_hand(self):
+        with self.assertRaises(gb.LimitRefused) as cm:
+            self.budget.set_limit(100.01)
+        self.assertIn("von Hand", str(cm.exception))
+        self.assertEqual(self.budget.set_limit(100)["new"], 100.0)
+        (self.user_cfg / "gemini-budget.json").write_text(json.dumps({"monthly_limit_eur": 150}), encoding="utf-8")
+        self.assertEqual(self.budget.status()["limit_eur"], 150.0)   # a hand edit may go higher
+        with self.assertRaises(gb.LimitRefused):
+            self.budget.set_limit(120)                               # the command still may not
+
+    def test_nonsense_is_refused(self):
+        for bad in (-1, float("nan"), float("inf"), True, "10"):
+            with self.assertRaises(gb.LimitRefused, msg=bad):
+                self.budget.set_limit(bad)
+        for text in ("zehn", "", "nan"):
+            with self.assertRaises(gb.LimitRefused, msg=text):
+                gb._parse_amount(text)
+        self.assertEqual(gb._parse_amount("12,50 €"), 12.5)
+
+    def test_broken_user_config_is_not_overwritten(self):
+        path = self.user_cfg / "gemini-budget.json"
+        path.write_text("{oops", encoding="utf-8")
+        with self.assertRaises(gb.LimitRefused):
+            self.budget.set_limit(15)
+        self.assertEqual(path.read_text(encoding="utf-8"), "{oops")
+
+    def test_warning_from_eighty_percent(self):
+        self.budget.charge("image", 7.99)
+        self.assertFalse(self.budget.status()["warning"])
+        self.budget.charge("image", 0.01)
+        s = self.budget.status()
+        self.assertTrue(s["warning"])
+        self.assertFalse(s["exhausted"])
+
+    def run_cli(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = gb._cli(list(argv), budget=self.budget)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_cli_shows_old_and_new_and_warns(self):
+        code, out, _ = self.run_cli("set-limit", "12,50", "--this-month")
+        self.assertEqual(code, 0)
+        self.assertIn("10,00 € → 12,50 €", out)
+        self.assertIn("nur für 2026-10", out)
+        self.budget.charge("image", 10.0)
+        code, out, _ = self.run_cli()
+        self.assertEqual(code, 0)
+        self.assertIn("⚠ Achtung: 80 %", out)
+        code, out, err = self.run_cli("set-limit", "5")
+        self.assertEqual(code, 1)
+        self.assertIn("Abgelehnt", err)
+
+
+class SetLimitIsCommandLineOnlyTests(IsolatedApp):
+    app_module_name = "_set_limit_app_under_test"
+
+    def test_no_route_or_button_changes_the_limit(self):
+        rules = {r.rule: r.methods for r in self.app.app.url_map.iter_rules()}
+        self.assertEqual(rules["/gemini-budget"] - {"HEAD", "OPTIONS"}, {"GET"})
+        self.assertFalse([r for r in rules if "limit" in r.lower()])
+        resp = self.client.post("/gemini-budget", json={"monthly_limit_eur": 50})
+        self.addCleanup(resp.close)
+        self.assertEqual(resp.status_code, 405)
+        for path in (DISPLAY / "templates" / "index.html", DISPLAY / "static" / "js" / "gemini-budget.js",
+                     DISPLAY / "dnd-display-app.py"):
+            src = path.read_text(encoding="utf-8")
+            self.assertNotIn("set_limit", src, path.name)
+            self.assertNotIn("set-limit", src, path.name)
+
+    def test_docs_forbid_allowlisting_it(self):
+        doc = (DISPLAY.parent / "SKILL-scripts.md").read_text(encoding="utf-8")
+        self.assertIn("gemini_budget.py set-limit", doc)
+        self.assertIn("Never add it to a permission allowlist", doc)
 
 
 class _Paid:
