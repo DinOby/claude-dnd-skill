@@ -77,6 +77,10 @@ try:
 except Exception:
     _tts = None   # type: ignore
 
+# Monthly Gemini cap (narration here, images in scripts/assets.py) — gemini_budget.py
+import gemini_budget as _gemini_budget
+_budget = _gemini_budget.Budget()
+
 # Action overlays — config-driven keyword → effect broadcast
 try:
     import vfx as _vfx
@@ -2146,10 +2150,26 @@ def tts_synthesize():
         voice = _tts.DEFAULT_VOICE
     if _tts.key_source() == "unset":
         return "TTS not configured (see docs/SKILL-tts.md)", 503
+    # 402 = monthly Gemini budget used up: the page reads the block with the
+    # browser's own voice instead (free). A broken ledger refuses too.
     try:
-        pcm = _tts.synthesize_strict(text, voice)
+        _budget.check(_budget.tts_estimate(text))
+    except (_gemini_budget.BudgetExceeded, TimeoutError) as e:
+        return jsonify({"error": "budget", "message": str(e), "budget": _budget_status_safe()}), 402
+    try:
+        pcm, usage = _tts.synthesize_with_usage(text, voice)
     except _tts.TtsError as e:
         return f"TTS upstream: {e}", 502
+    tokens_in, tokens_out = usage.get("promptTokenCount"), usage.get("candidatesTokenCount")
+    if isinstance(tokens_in, int) and isinstance(tokens_out, int):
+        cost = _budget.tts_cost(tokens_in, tokens_out)
+    else:
+        cost = _budget.tts_cost_from_audio(text, len(pcm))
+    try:
+        status = _budget.charge("tts", cost, detail=f"{len(text)} Zeichen", seconds=len(pcm) / 48000)
+        _broadcast({"gemini_budget": status})
+    except (_gemini_budget.BudgetExceeded, TimeoutError) as e:
+        print(f"[WARN] narration not booked in the Gemini ledger: {e}", file=sys.stderr)
     return Response(
         pcm,
         mimetype="audio/L16;codec=pcm;rate=24000",
@@ -2159,6 +2179,22 @@ def tts_synthesize():
             "Cache-Control": "no-store",
         },
     )
+
+
+def _budget_status_safe() -> "dict | None":
+    try:
+        return _budget.status()
+    except (_gemini_budget.BudgetExceeded, TimeoutError):
+        return None
+
+
+@app.route("/gemini-budget", methods=["GET"])
+def gemini_budget_status():
+    """This month's Gemini spending: {month, spent_eur, limit_eur, remaining_eur, images, …}."""
+    status = _budget_status_safe()
+    if status is None:
+        return jsonify({"error": "ledger unreadable"}), 503
+    return jsonify(status)
 
 
 @app.route("/voice", methods=["POST"])

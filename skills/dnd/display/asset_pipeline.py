@@ -25,6 +25,7 @@ from asset_queue import PendingQueue
 from asset_seed import SeedCatalog
 from asset_store import CATEGORIES, IMAGE_EXTS, KINDS, AssetStore, make_key, slugify
 from config_loader import ConfigFile, check_types
+from gemini_budget import Budget, BudgetExceeded
 from image_providers import MIME_EXT, ImageRequest, ImageResult, ProviderError, load_provider
 
 
@@ -163,8 +164,10 @@ class Pipeline:
     def __init__(self, store: AssetStore, queue: PendingQueue,
                  config: Optional[ConfigFile] = None,
                  loader: Callable = load_provider,
-                 catalog: Optional[SeedCatalog] = None):
+                 catalog: Optional[SeedCatalog] = None,
+                 budget: Optional[Budget] = None):
         self.store = store
+        self.budget = budget or Budget()   # monthly cap for paid providers (gemini_budget.py)
         self.queue = queue
         self.catalog = catalog
         self.config = config or provider_config()
@@ -214,10 +217,14 @@ class Pipeline:
         return prov
 
     @staticmethod
-    def _request(prov, prompt: str, kind: str, size: "list[int]"):
-        """One provider call; raises on any failure, including an unusable image."""
+    def _request(prov, prompt: str, kind: str, size: "list[int]",
+                 on_paid: Callable[[], None]):
+        """One provider call; raises on any failure, including an unusable image.
+        `on_paid` runs as soon as the provider delivered an image — it is paid
+        for even if it turns out unusable below."""
         w, h = size
         result = prov.generate(ImageRequest(prompt=prompt, kind=kind, width=w, height=h))
+        on_paid()
         if not MIME_EXT.get(result.mime) or not result.data:
             raise ProviderError(f"unsupported image type {result.mime!r}")
         if kind == "sprite":   # cut out here, so a bad image counts as this entry's failure
@@ -227,6 +234,15 @@ class Pipeline:
                 raise ProviderError(f"could not cut out the background: {e}")
             result = ImageResult(data=data, mime=mime, meta=result.meta)
         return result
+
+    def _paid_guard(self, prov, key: str) -> Callable[[], None]:
+        """For a paid provider: BudgetExceeded if the month's Gemini cap would be
+        passed, else the callback that books the image once it is delivered."""
+        if not getattr(prov, "paid", False):
+            return lambda: None
+        cost = self.budget.image_cost(getattr(prov, "model", None))
+        self.budget.check(cost)
+        return lambda: self.budget.charge("image", cost, detail=key)
 
     def _store_image(self, key: str, kind: str, result, size: "list[int]") -> str:
         """Post-process and write one image; returns its path relative to the assets root."""
@@ -259,7 +275,7 @@ class Pipeline:
         summary = {"done": [], "failed": [], "planned": [], "blocked": []}
         unavailable: "dict[str, str]" = {}
         seed_prompts = self._seed_prompts()
-        for entry in entries:
+        for i, entry in enumerate(entries):
             key, kind = entry["key"], entry.get("kind", "item")
             if not entry.get("prompt") and not entry.get("hint") and key in seed_prompts:
                 entry = dict(entry, prompt=seed_prompts[key])
@@ -278,9 +294,16 @@ class Pipeline:
                 continue
 
             size = sizes.get(kind, [512, 512])
+            try:
+                on_paid = self._paid_guard(prov, key)
+            except (BudgetExceeded, TimeoutError) as e:
+                rest = [x["key"] for x in entries[i:]]
+                summary["blocked"].extend(k for k in rest if k not in summary["blocked"])
+                log(f"! {e} — {len(rest)} Bild(er) bleiben auf der Warteliste.")
+                break
             attempts = int(entry.get("attempts") or 0) + 1
             try:
-                result = self._request(prov, prompt, kind, size)
+                result = self._request(prov, prompt, kind, size, on_paid)
             except Exception as e:   # provider bugs must not abort the whole batch
                 retry = attempts < max_attempts
                 self.queue.update(key, status="pending" if retry else "failed",
@@ -352,7 +375,13 @@ class Pipeline:
 
             size = sizes.get(kind, [512, 512])
             try:
-                result = self._request(prov, prompt, kind, size)
+                on_paid = self._paid_guard(prov, key)
+            except (BudgetExceeded, TimeoutError) as e:
+                summary["blocked"].append(key)
+                log(f"! {e} — Standardkatalog angehalten.")
+                break
+            try:
+                result = self._request(prov, prompt, kind, size, on_paid)
             except Exception as e:   # one bad image must not stop the batch
                 summary["failed"].append(key)
                 log(f"✗ {key}: {e}")

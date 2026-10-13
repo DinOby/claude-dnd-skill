@@ -73,6 +73,7 @@ def _error_message(body: bytes) -> str:
 
 class GeminiProvider:
     name = "gemini"
+    paid = True   # every image costs money → asset_pipeline asks gemini_budget first
 
     def __init__(self, config: dict):
         self.model = config.get("model", DEFAULT_MODEL)

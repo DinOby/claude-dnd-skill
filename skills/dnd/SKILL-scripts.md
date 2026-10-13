@@ -522,6 +522,14 @@ $A prompt "Langschwert" "A longsword with a wolf-head pommel" --add   # specific
 
 Categories: `weapon armor potion scroll ring wand wondrous tool gear pc npc enemy map`. Failed generations are retried up to `max_attempts` (default 3), then marked `failed`. A provider that is not ready (e.g. missing API key) blocks its entries without using up attempts.
 
+**Monthly Gemini budget — `display/gemini_budget.py`.** Images (`generate`, `seed`) and narration (the display's `/tts`) share one hard cap per calendar month, default **10 €** (`display/config/gemini-budget.json`, override `{"monthly_limit_eur": N}` in `<data-root>/config/gemini-budget.json`). Before each paid call the cap is checked; once it would be passed, `generate`/`seed` stop and report the rest as *blocked* (they stay on the wait-list, no attempt used), and narration falls back to the browser's own voice (free). The display shows the month's total in Settings → "Gemini (Monat)". Ledger: `<runtime>/gemini-ledger.json`.
+
+```bash
+python3 ${CLAUDE_SKILL_DIR}/display/gemini_budget.py   # "Gemini 2026-10: 3.40 € von 10.00 € …"
+```
+
+Run it before offering an image batch and include the remaining budget in the cost question. A *blocked* batch with "Monatsbudget erreicht" is final for this month — tell the DM, do not retry or raise the limit yourself.
+
 ---
 
 ## Deterministic Graph Extraction — `scripts/graph_extract_deterministic.py`

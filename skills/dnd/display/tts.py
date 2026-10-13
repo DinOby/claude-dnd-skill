@@ -96,6 +96,16 @@ def synthesize_strict(
 
     Raises TtsError for any failure. Use synthesize() for the silent-fail path.
     """
+    return synthesize_with_usage(text, voice, timeout)[0]
+
+
+def synthesize_with_usage(
+    text: str,
+    voice: str = DEFAULT_VOICE,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> "tuple[bytes, dict]":
+    """As synthesize_strict, plus Gemini's usageMetadata ({} when absent) —
+    the token counts the narration is billed by."""
     key = _get_api_key()
     if not key:
         raise TtsError("no api key configured")
@@ -159,7 +169,8 @@ def synthesize_strict(
 
     if not pcm:
         raise TtsError("empty pcm payload")
-    return pcm
+    usage = data.get("usageMetadata") if isinstance(data, dict) else None
+    return pcm, (usage if isinstance(usage, dict) else {})
 
 
 def synthesize(text: str, voice: str = DEFAULT_VOICE) -> Optional[bytes]:

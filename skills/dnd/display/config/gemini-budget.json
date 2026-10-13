@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "monthly_limit_eur": 10,
+  "prices_checked": "2026-10-13 · https://ai.google.dev/gemini-api/docs/pricing (paid tier, standard)",
+  "usd_per_eur_note": "Prices are in USD and counted 1:1 as EUR — that over-counts slightly, so the cap is never exceeded by the exchange rate.",
+  "image_price_usd": {
+    "gemini-3.1-flash-lite-image": 0.0336,
+    "default": 0.15
+  },
+  "tts_price_usd_per_1m_tokens": {
+    "input": 0.50,
+    "output": 10.00
+  },
+  "tts_audio_tokens_per_second": 25,
+  "tts_chars_per_second": 12
+}

@@ -3869,6 +3869,7 @@
 <script src="/static/js/play-as.js"></script>
 <script src="/static/js/logbook.js"></script>
 <script src="/static/js/combat-music.js"></script>
+<script src="/static/js/gemini-budget.js"></script>
 
 <script>
 'use strict';
@@ -6536,6 +6537,7 @@ const _SVG_SPIN    = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height=
 const _SVG_CHEVRON = '<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M2 3.5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function _ttsStopActive() {
+  if (window.DndBudget) DndBudget.stop();   // fallback voice (Gemini budget used up)
   if (_ttsActiveSource) {
     try { _ttsActiveSource.stop(); } catch (_) {}
     _ttsActiveSource = null;
@@ -6575,6 +6577,24 @@ async function _ttsPlayBlock(btn, blockEl) {
       headers: _authHeaders(),
       body: JSON.stringify({ text, voice: _ttsVoice }),
     });
+    if (resp.status === 402 && window.DndBudget) {
+      // Monthly Gemini budget used up — read it with the browser's free voice.
+      const info = await resp.json().catch(() => ({}));
+      if (info.budget) DndBudget.show(info.budget);
+      btn.innerHTML = _SVG_STOP;
+      btn.classList.remove('tts-loading');
+      btn.classList.add('tts-playing');
+      btn.setAttribute('aria-label', 'Stop narration');
+      btn.title = 'Gemini-Budget erreicht – Browser-Stimme';
+      await DndBudget.speak(text);
+      if (_ttsActivePlayBtn === btn) {
+        btn.innerHTML = _SVG_SPEAKER;
+        btn.classList.remove('tts-playing');
+        btn.setAttribute('aria-label', 'Listen to narration');
+        _ttsActivePlayBtn = null;
+      }
+      return;
+    }
     if (!resp.ok) throw new Error('TTS ' + resp.status);
     const pcm = await resp.arrayBuffer();
     if (!pcm.byteLength) throw new Error('TTS empty');
