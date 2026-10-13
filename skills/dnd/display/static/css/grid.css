@@ -243,15 +243,17 @@ body.grid-on.grid-size-side #new-content-pill { left: auto; right: calc(var(--si
 .grid-token-name {
   position: absolute;
   top: 88%;
-  max-width: calc(var(--cell) * 2.4);
+  width: max-content;
+  max-width: calc(var(--cell) * 3);
   padding: 0 4px;
   border-radius: 3px;
   font-family: Georgia, serif;
   font-size: calc(var(--cell) * 0.24);
   line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: center;
+  /* Long names ("Tilda Rauschenberg") wrap onto a second line instead of being cut off. */
+  white-space: normal;
+  overflow-wrap: break-word;
   color: #f4e6c4;
   background: rgba(0, 0, 0, 0.55);
 }
