@@ -80,6 +80,7 @@ except Exception:
 # Monthly Gemini cap (narration here, images in scripts/assets.py) — gemini_budget.py
 import gemini_budget as _gemini_budget
 _budget = _gemini_budget.Budget()
+_tts_limiter = _gemini_budget.HourlyLimiter()   # paid narration per player device and hour
 
 # Action overlays — config-driven keyword → effect broadcast
 try:
@@ -2212,6 +2213,15 @@ def tts_synthesize():
         _budget.check(_budget.tts_estimate(text))
     except (_gemini_budget.BudgetExceeded, TimeoutError) as e:
         return jsonify({"error": "budget", "message": str(e), "budget": _budget_status_safe()}), 402
+    # Paid narration per player device and hour (gemini-budget.json →
+    # tts_per_device_per_hour); the DM's own page on this machine is exempt.
+    # Keyed by the connection's peer address, which a player cannot change.
+    if not _is_local_client():
+        per_hour = _budget.tts_per_device_per_hour()
+        if not _tts_limiter.allow(request.remote_addr or "?", per_hour):
+            return jsonify({"error": "tts_limit", "per_hour": per_hour,
+                            "message": f"Vorlese-Grenze erreicht: höchstens {per_hour} Gemini-Absätze "
+                                       f"pro Stunde und Gerät. Dieser Absatz kommt mit der Browser-Stimme."}), 429
     try:
         pcm, usage = _tts.synthesize_with_usage(text, voice)
     except _tts.TtsError as e:

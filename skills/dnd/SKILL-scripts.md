@@ -532,6 +532,8 @@ python3 ${CLAUDE_SKILL_DIR}/display/gemini_budget.py set-limit 12,50 --this-mont
 
 Run the status before offering an image batch and include the remaining budget in the cost question. From 80 % of the limit (`warn_ratio`) the status prints a warning and Settings shows the amount with ⚠ in amber. A *blocked* batch with "Monatsbudget erreicht" is final for this month — tell the DM, do not retry.
 
+**Narration per player device:** each player device may trigger at most `tts_per_device_per_hour` (default 20) paid Gemini narration blocks per hour, counted by its network address (not by a header it could change); beyond that `/tts` answers 429 and that page reads with the free browser voice. The DM's own page on `localhost` is exempt. Change it in `<data-root>/config/gemini-budget.json` (e.g. `{"tts_per_device_per_hour": 10}`; `0` = players always use the browser voice). The count lives in memory and starts fresh when the display restarts.
+
 **`set-limit` — only when the DM explicitly asks for a new limit, and only from the command line.** It prints the old and the new limit, refuses a value below what this month has already booked, and refuses more than `max_settable_limit_eur` (100 €); higher is possible only by the DM editing `<data-root>/config/gemini-budget.json` by hand — never edit that file yourself to get around the cap. No web route or button can change the limit. **Never add it to a permission allowlist** (`settings.json` / `settings.local.json`): Claude Code must ask the DM before every change. Never raise the limit on your own because a batch was blocked.
 
 ---

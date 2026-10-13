@@ -3,6 +3,8 @@
   "monthly_limit_eur": 10,
   "max_settable_limit_eur": 100,
   "warn_ratio": 0.8,
+  "tts_per_device_per_hour": 20,
+  "tts_per_device_note": "Gemini narration blocks per player device and hour (the DM's own page on localhost is exempt). Beyond that the page reads with the free browser voice. 0 = players always use the browser voice.",
   "prices_checked": "2026-10-13 · https://ai.google.dev/gemini-api/docs/pricing (paid tier, standard)",
   "usd_per_eur_note": "Prices are in USD and counted 1:1 as EUR — that over-counts slightly, so the cap is never exceeded by the exchange rate.",
   "image_price_usd": {

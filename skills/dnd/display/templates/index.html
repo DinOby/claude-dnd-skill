@@ -6498,15 +6498,21 @@ async function _ttsPlayBlock(btn, blockEl) {
       headers: _authHeaders(),
       body: JSON.stringify({ text, voice: _ttsVoice }),
     });
-    if (resp.status === 402 && window.DndBudget) {
-      // Monthly Gemini budget used up — read it with the browser's free voice.
+    if ((resp.status === 402 || resp.status === 429) && window.DndBudget) {
+      // 402: monthly Gemini budget used up; 429: this device's hourly narration
+      // limit (or the general rate limit) — read it with the browser's free voice.
       const info = await resp.json().catch(() => ({}));
       if (info.budget) DndBudget.show(info.budget);
+      if (info.error === 'tts_limit' && info.message && Date.now() - (window._ttsLimitToastAt || 0) > 600000) {
+        window._ttsLimitToastAt = Date.now();   // once per 10 min, not on every auto-narrated block
+        _showToast(info.message, 5000);
+      }
       btn.innerHTML = _SVG_STOP;
       btn.classList.remove('tts-loading');
       btn.classList.add('tts-playing');
       btn.setAttribute('aria-label', 'Stop narration');
-      btn.title = 'Gemini-Budget erreicht – Browser-Stimme';
+      btn.title = info.error === 'tts_limit' ? 'Vorlese-Grenze pro Stunde erreicht – Browser-Stimme'
+                                             : 'Gemini-Budget erreicht – Browser-Stimme';
       await DndBudget.speak(text);
       if (_ttsActivePlayBtn === btn) {
         btn.innerHTML = _SVG_SPEAKER;

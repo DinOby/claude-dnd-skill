@@ -352,11 +352,85 @@ class NarrationBudgetTests(IsolatedApp):
         self.assertEqual(resp.get_json()["spent_eur"], 1.25)
 
 
+class NarrationLimitTests(IsolatedApp):
+    """Paid narration per player device and hour; the DM's own page is exempt."""
+    app_module_name = "_tts_limit_app_under_test"
+
+    def setUp(self):
+        home = isolate_process()
+        self.app._budget = gb.Budget(ledger_path=str(Path(home) / f"ledger-{self._testMethodName}.json"),
+                                     now=lambda: OCT)
+        self.app._tts_limiter = gb.HourlyLimiter()
+        self.app._rate_ok = lambda *a, **kw: True   # the general write rate limit is not tested here
+        for target, value in (("key_source", "env:TEST"), ("synthesize_with_usage", (b"\x00\x00", {}))):
+            p = mock.patch.object(self.app._tts, target, return_value=value)
+            started = p.start()
+            self.addCleanup(p.stop)
+            if target == "synthesize_with_usage":
+                self.synth = started
+        p = mock.patch.object(self.app._budget, "tts_per_device_per_hour", return_value=2)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def post_tts(self, addr):
+        resp = self.client.post("/tts", json={"text": "Die Tür knarrt."}, environ_base={"REMOTE_ADDR": addr})
+        self.addCleanup(resp.close)
+        return resp
+
+    def test_player_device_is_limited_per_hour(self):
+        self.assertEqual([self.post_tts("100.64.0.2").status_code for _ in range(2)], [200, 200])
+        resp = self.post_tts("100.64.0.2")
+        self.assertEqual(resp.status_code, 429)
+        body = resp.get_json()
+        self.assertEqual((body["error"], body["per_hour"]), ("tts_limit", 2))
+        self.assertIn("Browser-Stimme", body["message"])
+        self.assertEqual(self.synth.call_count, 2)                    # the third never reached Gemini
+        self.assertEqual(self.post_tts("100.64.0.3").status_code, 200)  # another player's own allowance
+
+    def test_dm_page_on_this_machine_is_exempt(self):
+        for addr in ("127.0.0.1", "::1"):
+            self.assertEqual([self.post_tts(addr).status_code for _ in range(5)], [200] * 5)
+
+    def test_device_header_does_not_reset_the_count(self):
+        for i in range(2):
+            self.client.post("/tts", json={"text": "x"}, headers={"X-DND-Device": f"dev{i}"},
+                             environ_base={"REMOTE_ADDR": "100.64.0.4"}).close()
+        resp = self.client.post("/tts", json={"text": "x"}, headers={"X-DND-Device": "brand-new"},
+                                environ_base={"REMOTE_ADDR": "100.64.0.4"})
+        self.addCleanup(resp.close)
+        self.assertEqual(resp.status_code, 429)
+
+
+class HourlyLimiterTests(unittest.TestCase):
+    def test_window_slides(self):
+        now = [1000.0]
+        lim = gb.HourlyLimiter(clock=lambda: now[0])
+        self.assertEqual([lim.allow("a", 3) for _ in range(4)], [True, True, True, False])
+        self.assertEqual(lim.used("a"), 3)
+        self.assertTrue(lim.allow("b", 3))                 # keys are separate
+        now[0] += 3599
+        self.assertFalse(lim.allow("a", 3))
+        now[0] += 2                                        # the first three are older than an hour
+        self.assertTrue(lim.allow("a", 3))
+
+    def test_zero_means_never(self):
+        self.assertFalse(gb.HourlyLimiter().allow("a", 0))
+
+    def test_config_default_and_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = ConfigFile("gemini-budget.json", validator=gb._validate,
+                             default_dir=str(DISPLAY / "config"), user_dir=tmp)
+            self.assertEqual(gb.Budget(config=cfg, ledger_path=os.path.join(tmp, "l.json")).tts_per_device_per_hour(), 20)
+            self.assertEqual(gb._validate(dict(cfg.get(), tts_per_device_per_hour=-1))[-1:],
+                             ["tts_per_device_per_hour must be a whole number ≥ 0"])
+            self.assertTrue(gb._validate(dict(cfg.get(), tts_per_device_per_hour="viel")))
+
+
 class PageWiringTests(unittest.TestCase):
     def test_page_loads_the_module_and_falls_back_on_402(self):
         html = (DISPLAY / "templates" / "index.html").read_text(encoding="utf-8")
         self.assertIn('<script src="/static/js/gemini-budget.js"></script>', html)
-        self.assertIn("resp.status === 402 && window.DndBudget", html)
+        self.assertIn("(resp.status === 402 || resp.status === 429) && window.DndBudget", html)
         self.assertIn("DndBudget.stop()", html)
         js = (DISPLAY / "static" / "js" / "gemini-budget.js").read_text(encoding="utf-8")
         self.assertIn("speechSynthesis.speak", js)

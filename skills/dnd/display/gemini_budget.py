@@ -36,6 +36,7 @@ import json
 import math
 import os
 import sys
+import threading
 import time
 from datetime import datetime
 from typing import Callable, Optional
@@ -69,6 +70,9 @@ def _validate(cfg: dict) -> "list[str]":
     ratio = cfg.get("warn_ratio", 0.8)
     if not isinstance(ratio, (int, float)) or not 0 < ratio <= 1:
         problems.append("warn_ratio must be a number in (0, 1]")
+    per_hour = cfg.get("tts_per_device_per_hour", 20)
+    if isinstance(per_hour, bool) or not isinstance(per_hour, int) or per_hour < 0:
+        problems.append("tts_per_device_per_hour must be a whole number ≥ 0")
     prices = cfg.get("image_price_usd")
     if not isinstance(prices, dict) or not isinstance(prices.get("default"), (int, float)):
         problems.append("image_price_usd needs a numeric 'default'")
@@ -80,6 +84,38 @@ def _validate(cfg: dict) -> "list[str]":
 
 def budget_config() -> ConfigFile:
     return ConfigFile("gemini-budget.json", validator=_validate)
+
+
+class HourlyLimiter:
+    """At most N events per key in any 60-minute window (in memory, per process).
+
+    Used by the display for paid narration per player device: the key is the
+    connection's peer address — a request header (device id) could be changed
+    by the player at will, the Tailscale address of their machine cannot."""
+
+    WINDOW = 3600.0
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic):
+        self._clock = clock
+        self._events: "dict[str, list[float]]" = {}
+        self._lock = threading.Lock()
+
+    def allow(self, key: str, limit: int) -> bool:
+        """Count one event for `key` if it is still under `limit`; False otherwise."""
+        now = self._clock()
+        with self._lock:
+            recent = [t for t in self._events.get(key, []) if now - t < self.WINDOW]
+            if len(recent) >= limit:
+                self._events[key] = recent
+                return False
+            recent.append(now)
+            self._events[key] = recent
+            return True
+
+    def used(self, key: str) -> int:
+        now = self._clock()
+        with self._lock:
+            return sum(1 for t in self._events.get(key, []) if now - t < self.WINDOW)
 
 
 class _FileLock:
@@ -127,6 +163,9 @@ class Budget:
 
     def max_settable_eur(self) -> float:
         return float(self.config.get().get("max_settable_limit_eur", 100))
+
+    def tts_per_device_per_hour(self) -> int:
+        return int(self.config.get().get("tts_per_device_per_hour", 20))
 
     def _month_limit(self, m: dict) -> "tuple[float, str]":
         override = m.get("limit_override_eur")
