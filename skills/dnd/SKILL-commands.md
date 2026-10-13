@@ -12,8 +12,8 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
    **Q1 *"Display & input mode?"***
    - `No display` → continue without display.
    - `Display (local)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh`, print URL, set `_display_running = true`, then `python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --clear`.
-   - `Display (LAN)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan`, print both URLs, set `_display_running = true`, then `--clear` as above.
-   - `Display + autorun (LAN)` → as **Display (LAN)**, and write `autorun: true` to `state.md → ## Session Flags`.
+   - `Display (Tailscale)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --bind tailscale`, print both URLs (local + Tailscale), set `_display_running = true`, then `--clear` as above. If the script prints `ERROR: display not started — …` (Tailscale not installed, stopped or logged out), tell the DM the reason in one sentence and offer `Display (local)` instead. **Never fall back to `--lan`** — it opens the display on every network the machine is in.
+   - `Display + autorun (Tailscale)` → as **Display (Tailscale)**, and write `autorun: true` to `state.md → ## Session Flags`.
 
    **Q2 *"Dice rolls?"*** — set how PC d20s are handled (see SKILL.md "Dice convention"):
    - `Players roll their own` (default) → write `roll_mode: players` to `state.md → ## Session Flags`. You will call for each PC roll and wait — never auto-roll a PC.
@@ -73,8 +73,8 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
    **Q1 *"Display & input mode?"***
    - `No display` → continue without display.
    - `Display (local)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh`, print URL, set `_display_running = true`.
-   - `Display (LAN)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan`, print both URLs, set `_display_running = true`.
-   - `Display + autorun (LAN)` → as **Display (LAN)**, and also write `autorun: true` to `state.md → ## Session Flags`; enter the autorun wait after the recap.
+   - `Display (Tailscale)` → `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --bind tailscale`, print both URLs (local + Tailscale), set `_display_running = true`. If the script prints `ERROR: display not started — …` (Tailscale not installed, stopped or logged out), tell the DM the reason in one sentence and offer `Display (local)` instead. **Never fall back to `--lan`** — it opens the display on every network the machine is in.
+   - `Display + autorun (Tailscale)` → as **Display (Tailscale)**, and also write `autorun: true` to `state.md → ## Session Flags`; enter the autorun wait after the recap.
 
    **Q2 *"Dice rolls?"*** — confirm how PC d20s are handled this session (see SKILL.md "Dice convention"). Pre-fill the recommended option from the existing `roll_mode` in `state.md` if present, else `players`:
    - `Players roll their own` → write `roll_mode: players`. Call for each PC roll and wait — never auto-roll a PC.
@@ -513,7 +513,7 @@ Pull the latest skill changes from `origin/main`.
 ---
 
 ## `/dm:dnd display [start|stop|status]`
-- `start` → ask LAN mode [y/n]; run `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh [--lan]`; print URL(s)
+- `start` → ask whether remote players join [y/n]; run `bash ${CLAUDE_SKILL_DIR}/display/start-display.sh [--bind tailscale]`; print URL(s). Same failure rule as at session setup: report the reason, offer local, never `--lan`.
 - `stop` → `kill $(cat ${CLAUDE_SKILL_DIR}/display/app.pid) 2>/dev/null && rm -f ${CLAUDE_SKILL_DIR}/display/app.pid`
 - `status` → `curl -sk $(cat ${CLAUDE_SKILL_DIR}/display/.scheme 2>/dev/null || echo http)://localhost:5001/ping` — reachable or unreachable
 - No argument → print quick-start instructions

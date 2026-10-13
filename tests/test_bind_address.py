@@ -180,6 +180,18 @@ class AutorunPermissionTests(unittest.TestCase):
         self.assertNotIn("add it automatically", section)
         self.assertIn("Never touch the permission settings", section)
 
+    def test_session_setup_starts_on_tailscale_never_lan(self):
+        text = (SKILL / "SKILL-commands.md").read_text(encoding="utf-8")
+        lines = [ln for ln in text.splitlines() if ln.lstrip().startswith("- `Display (")]
+        self.assertEqual(len(lines), 4, lines)   # local + Tailscale, in /new and /load
+        tailscale = [ln for ln in lines if "Display (Tailscale)" in ln]
+        self.assertEqual(len(tailscale), 2)
+        for ln in tailscale:
+            self.assertIn("start-display.sh --bind tailscale", ln)
+            self.assertIn("Never fall back to `--lan`", ln)
+        for ln in lines:
+            self.assertNotIn("start-display.sh --lan", ln)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -591,7 +591,8 @@ Browser tab → Chromecast → TV
 **Start the display:**
 ```bash
 bash ${CLAUDE_SKILL_DIR}/display/start-display.sh          # localhost
-bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan    # LAN mode (phones, tablets)
+bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --bind tailscale   # remote players: localhost + Tailscale only (fails closed)
+bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan    # LAN mode (every network — not for remote play)
 open https://localhost:5001                                  # open browser before /dm:dnd load
 ```
 
