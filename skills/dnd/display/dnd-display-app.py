@@ -218,6 +218,18 @@ if _LAN_MODE:
 if _TLS_MODE:
     sys.argv.remove("--tls")
 
+# --bind tailscale | <Tailscale IP>: listen on 127.0.0.1 and that address only
+# (bind_address.py). Fails closed — never falls back to 0.0.0.0.
+import bind_address as _bind
+try:
+    _BIND_ARG = _bind.pop_bind_arg(sys.argv)
+    if _BIND_ARG is not None and _LAN_MODE:
+        raise _bind.BindError("--bind and --lan exclude each other (--lan listens on every network).")
+    _BIND_ADDR: Optional[str] = _bind.resolve_bind(_BIND_ARG) if _BIND_ARG is not None else None
+except _bind.BindError as _e:
+    print(f"ERROR: display not started — {_e}", file=sys.stderr)
+    raise SystemExit(2)
+
 
 def _get_or_create_token() -> str:
     """Load or generate the access token. Upgrades short legacy tokens to 64-char."""
@@ -260,7 +272,10 @@ def _local_addresses() -> "set[str]":
     return names
 
 
-_ALLOWED_HOSTS = _local_addresses() if _LAN_MODE else {"localhost", "127.0.0.1", "::1"}
+if _BIND_ADDR:
+    _ALLOWED_HOSTS = _bind.allowed_hosts(_BIND_ADDR)
+else:
+    _ALLOWED_HOSTS = _local_addresses() if _LAN_MODE else {"localhost", "127.0.0.1", "::1"}
 _ALLOWED_HOSTS |= {h.strip().lower() for h in os.environ.get("DND_ALLOWED_HOSTS", "").split(",") if h.strip()}
 _OWN_ORIGINS = sorted(f"{scheme}://{f'[{h}]' if ':' in h else h}:5001"
                       for h in _ALLOWED_HOSTS for scheme in ("http", "https"))
@@ -3534,6 +3549,21 @@ if __name__ == "__main__":
     except OSError:
         pass
 
+    if _BIND_ADDR:
+        try:
+            _servers = _bind.make_servers(_bind.listen_addresses(_BIND_ADDR), 5001, app, ssl_ctx)
+        except _bind.BindError as _e:
+            print(f"ERROR: display not started — {_e}", file=sys.stderr)
+            raise SystemExit(2)
+        _net_host = f"[{_BIND_ADDR}]" if ":" in _BIND_ADDR else _BIND_ADDR
+        print(f"DnD DM Display — Tailscale mode (localhost + {_BIND_ADDR}, port 5001) [{scheme.upper()}]")
+        print(f"  Local:   {scheme}://localhost:5001")
+        print(f"  Network: {scheme}://{_net_host}:5001")
+        print("  Not reachable from any other network (no 0.0.0.0).", flush=True)
+        for _s in _servers[1:]:
+            threading.Thread(target=_s.serve_forever, daemon=True).start()
+        _servers[0].serve_forever()
+        raise SystemExit(0)
     if _LAN_MODE:
         print(f"DnD DM Display — LAN mode (0.0.0.0:5001) [{scheme.upper()}]")
         print(f"  Local:  {scheme}://localhost:5001")

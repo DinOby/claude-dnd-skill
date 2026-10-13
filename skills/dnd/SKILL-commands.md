@@ -929,13 +929,11 @@ Toggle autorun (taxi) mode — Claude drives the turn loop automatically when pl
 
 **On:**
 1. Write `autorun: true` to `state.md → ## Session Flags`.
-2. **Check Bash permissions** — read `~/.claude/settings.json`. If `permissions.allow` does not include `"Bash"` (or `"Bash(*)"` or similar), add it automatically:
-   - Read the file, merge `"Bash"` into `permissions.allow`, write it back.
-   - Tell the DM: *"Added Bash to permissions.allow in ~/.claude/settings.json — autorun won't prompt for each wait. Restart this session for it to take effect if it doesn't immediately."*
-   - If it was already present, skip silently.
-3. Confirm to the DM: *"Autorun enabled. Players submit via the display; I'll pick up each action automatically. Send me a message at any time to take control of a turn."*
-4. If the user specified an interval (e.g. `/dm:dnd autorun on 45`), write `autorun_interval: 45` to `state.md → ## Session Flags`. Default is 60 if omitted.
-5. Immediately enter the autorun wait (see SKILL.md for the Bash block). If there's already something in `.input_queue`, pick it up as the current turn's player action.
+2. Confirm to the DM: *"Autorun enabled. Players submit via the display; I'll pick up each action automatically. Send me a message at any time to take control of a turn."*
+3. If the user specified an interval (e.g. `/dm:dnd autorun on 45`), write `autorun_interval: 45` to `state.md → ## Session Flags`. Default is 60 if omitted.
+4. Immediately enter the autorun wait (see SKILL.md for the Bash block). If there's already something in `.input_queue`, pick it up as the current turn's player action.
+
+**Never touch the permission settings for autorun.** Do not add `"Bash"`, `"Bash(*)"` or any other blanket rule to a `settings.json` — player text reaches this session, and a blanket rule would let it run any command on the DM's machine without a prompt. If the wait command prompts, the DM can allow exactly that command once ("don't ask again" adds a narrow rule).
 
 The display shows a pie-clock countdown draining from full to empty over the interval. Green pulse = actively waiting. Configurable via `autorun_interval: N` in state.md (default 60 seconds).
 

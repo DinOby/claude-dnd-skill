@@ -37,7 +37,17 @@ bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan
 
 # LAN mode with TLS — HTTPS, for public or untrusted networks
 bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --lan --tls
+
+# Tailscale only — localhost + this machine's Tailscale address, nothing else
+bash ${CLAUDE_SKILL_DIR}/display/start-display.sh --bind tailscale
 ```
+
+**`--bind tailscale`** is for remote players over Tailscale. Unlike `--lan` (0.0.0.0, every
+network the machine is in) it listens on 127.0.0.1, ::1 and the Tailscale address only, so the
+home Wi-Fi or a hotspot cannot reach the display. It fails closed: if Tailscale is not
+installed, not running or logged out — or `--bind <ip>` is not this machine's Tailscale
+address — the display does not start and `start-display.sh` prints the reason. It never falls
+back to 0.0.0.0. `--bind` and `--lan` exclude each other.
 
 **HTTP is the default.** No certificate warnings — guests and new devices connect instantly
 with no setup required. This is the recommended mode for home and trusted networks.

@@ -5,6 +5,11 @@
 #   bash start-display.sh              # localhost only, HTTP (default)
 #   bash start-display.sh --lan        # LAN mode, HTTP  ← use this for home/trusted networks
 #   bash start-display.sh --lan --tls  # LAN mode, HTTPS ← use this on public/untrusted networks
+#   bash start-display.sh --bind tailscale        # 127.0.0.1 + this machine's Tailscale address only
+#   bash start-display.sh --bind 100.x.y.z        # same, with the address given (must be ours)
+#
+# --bind never listens on 0.0.0.0: if Tailscale is not running the display
+# refuses to start and says why (see bind_address.py).
 #
 # HTTP is the default. Guests and new devices connect instantly with no setup.
 # TLS adds encryption but requires a one-time certificate install on each device.
@@ -25,16 +30,30 @@ RT="$(python3 -c "import sys,os;sys.path.insert(0,os.path.join('$DISPLAY_DIR','.
 # ── Parse flags ───────────────────────────────────────────────────────────────
 LAN_FLAG=""
 TLS_MODE=false
+BIND_ADDR=""
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --lan) LAN_FLAG="--lan" ;;
     --tls) TLS_MODE=true ;;
+    --bind)
+      if [[ -z "${2:-}" || "$2" == --* ]]; then
+        echo "Error: --bind needs a value: --bind tailscale  or  --bind <your Tailscale IP>"
+        exit 1
+      fi
+      BIND_ADDR="$2"; shift ;;
+    --bind=*) BIND_ADDR="${1#--bind=}" ;;
   esac
+  shift
 done
 
-if $TLS_MODE && [[ -z "$LAN_FLAG" ]]; then
-  echo "Error: --tls requires --lan (TLS is only meaningful for network access)"
+if [[ -n "$BIND_ADDR" && -n "$LAN_FLAG" ]]; then
+  echo "Error: --bind and --lan exclude each other (--lan listens on every network)"
+  exit 1
+fi
+
+if $TLS_MODE && [[ -z "$LAN_FLAG" && -z "$BIND_ADDR" ]]; then
+  echo "Error: --tls requires --lan or --bind (TLS is only meaningful for network access)"
   exit 1
 fi
 
@@ -100,10 +119,12 @@ if ! python3 -c "import flask, flask_cors" 2>/dev/null; then
 fi
 
 # ── Start Flask ───────────────────────────────────────────────────────────────
-APP_ARGS="$LAN_FLAG"
-$TLS_MODE && APP_ARGS="$APP_ARGS --tls"
+APP_ARGS=()
+[[ -n "$LAN_FLAG" ]] && APP_ARGS+=(--lan)
+[[ -n "$BIND_ADDR" ]] && APP_ARGS+=(--bind "$BIND_ADDR")
+$TLS_MODE && APP_ARGS+=(--tls)
 
-nohup python3 "$DISPLAY_DIR/dnd-display-app.py" $APP_ARGS > "$LOG" 2>&1 &
+nohup python3 "$DISPLAY_DIR/dnd-display-app.py" "${APP_ARGS[@]}" > "$LOG" 2>&1 &
 echo $! > "$PID_FILE"
 
 LOCAL_URL="${SCHEME}://localhost:5001"
@@ -115,6 +136,7 @@ for i in $(seq 1 10); do
     echo ""
     echo "Display started — $LOCAL_URL"
     [[ -n "$LAN_IP" ]] && echo "LAN access:     ${SCHEME}://${LAN_IP}:5001"
+    [[ -n "$BIND_ADDR" ]] && grep -m1 "Network:" "$LOG" | sed 's/^ *Network: */Tailscale access: /'
 
     if $TLS_MODE; then
       echo ""
@@ -155,5 +177,9 @@ for i in $(seq 1 10); do
   fi
 done
 
+if grep -q "^ERROR: display not started" "$LOG" 2>/dev/null; then
+  grep "^ERROR: display not started" "$LOG"
+  exit 2
+fi
 echo "Warning: display server may not have started. Check $LOG for details."
 exit 1
