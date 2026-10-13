@@ -77,11 +77,28 @@ def record(campaign_dir, events: "Iterable[tuple[str, dict]]", src: str, by: str
 
 
 def active_campaign_dir() -> "Optional[pathlib.Path]":
-    """The campaign the display scripts work on (<runtime>/.campaign), or None."""
+    """The active campaign, or None.
+
+    <runtime>/.campaign (written by push_stats.py --set-campaign) first, then
+    <runtime>/active-campaign.json (written by /dm:dnd load) — the display may
+    not have been told yet while the scripts already run.
+    """
     try:
+        import json
         from paths import runtime_dir, find_campaign
-        name = (pathlib.Path(runtime_dir()) / ".campaign").read_text(encoding="utf-8").strip()
+        base = pathlib.Path(runtime_dir())
+        name = ""
+        try:
+            name = (base / ".campaign").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
         if not name:
+            try:
+                data = json.loads((base / "active-campaign.json").read_text(encoding="utf-8"))
+                name = str(data.get("name") or "").strip() if isinstance(data, dict) else ""
+            except (OSError, ValueError):
+                pass
+        if not name or "/" in name or "\\" in name or name.startswith("."):
             return None
         return find_campaign(name)
     except Exception:

@@ -22,7 +22,8 @@
       "xp.set", "xp.award",
       "inspiration.set", "feature.set",
       "turn.order", "turn.current", "turn.round", "turn.clear",
-      "tracker.clear"
+      "tracker.clear",
+      "import"
     ]},
     "data": {"type": "object"}
   },
@@ -53,6 +54,7 @@
     "turn.current":      {"type": "object", "required": ["who"], "properties": {"who": {"type": "string"}, "round": {"type": "integer", "minimum": 0}}},
     "turn.round":        {"type": "object", "required": ["round"], "properties": {"round": {"type": "integer", "minimum": 0}}},
     "turn.clear":        {"type": "object", "properties": {}},
-    "tracker.clear":     {"type": "object", "properties": {"all": {"type": "boolean"}}}
+    "tracker.clear":     {"type": "object", "properties": {"all": {"type": "boolean"}}},
+    "import":            {"type": "object", "required": ["source", "characters"], "properties": {"source": {"type": "string"}, "characters": {"type": "object"}}}
   }
 }

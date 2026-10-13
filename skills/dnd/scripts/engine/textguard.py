@@ -8,9 +8,10 @@ Claude happens inside a frame (game.py log), the same way player text is framed.
 
 import unicodedata
 
-NAME_MAX = 64      # names: characters, items, conditions, spells
+NAME_MAX = 64      # names: characters, conditions, spells, keys
 TEXT_MAX = 200     # free text: why, note
-LONG_FIELDS = frozenset({"why", "note"})
+ITEM_MAX = 240     # inventory lines ("Einbrecherpaket (Rucksack, 1000 Kugellager, …)")
+LONG_FIELDS = {"why": TEXT_MAX, "note": TEXT_MAX, "item": ITEM_MAX, "inventory": ITEM_MAX}
 
 
 def clean(value: str, limit: int = NAME_MAX) -> str:
@@ -24,12 +25,17 @@ def clean(value: str, limit: int = NAME_MAX) -> str:
     return text
 
 
-def clean_data(data, field: str = ""):
-    """Clean every string inside `data` (dicts, lists, scalars); keys are cleaned as names."""
+def clean_data(data, field: str = "", limit: "int | None" = None):
+    """Clean every string inside `data`; keys are cleaned as names.
+
+    A long field (why, note, item, inventory) sets the cap for everything below it.
+    """
+    if limit is None and field in LONG_FIELDS:
+        limit = LONG_FIELDS[field]
     if isinstance(data, str):
-        return clean(data, TEXT_MAX if field in LONG_FIELDS else NAME_MAX)
+        return clean(data, limit or NAME_MAX)
     if isinstance(data, dict):
-        return {clean(str(k)): clean_data(v, str(k)) for k, v in data.items()}
+        return {clean(str(k)): clean_data(v, str(k), limit) for k, v in data.items()}
     if isinstance(data, (list, tuple)):
-        return [clean_data(v, field) for v in data]
+        return [clean_data(v, field, limit) for v in data]
     return data
