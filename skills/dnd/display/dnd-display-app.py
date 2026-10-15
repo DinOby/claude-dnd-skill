@@ -1469,6 +1469,43 @@ def _lookup_inventory_line(name: str, category, level) -> "dict | None":
     return None
 
 
+_RULES_SECTIONS = {"spell": ("spells",), "feature": ("features",),
+                   "condition": ("conditions",), None: ("spells", "features", "conditions")}
+
+
+def _lookup_rules_alias(name: str, category, level) -> "dict | None":
+    """German rules name → SRD lookup; None when there is no alias or no hit."""
+    import re as _re
+    import item_names as _item_names
+    import config_loader as _cfg
+    sections = _RULES_SECTIONS.get(category)
+    if not sections:
+        return None
+    table = _item_names.rules_aliases(os.path.join(_HERE, "config"))
+    user = _item_names.rules_aliases(_cfg._default_user_dir())
+    for sec in table:
+        table[sec].update(user.get(sec, {}))
+    plain = _re.sub(r"\s*\([^)]*\)", "", name).strip()
+    plain = _re.sub(r"\s*[\d/]+\s*$", "", plain).strip()   # "Kampfrausch 1/2"
+    for key in dict.fromkeys([name.casefold(), plain.casefold()]):
+        for sec in sections:
+            srd = table.get(sec, {}).get(key)
+            if not srd:
+                continue
+            cat = {"spells": "spell", "features": "feature", "conditions": "condition"}[sec]
+            # The campaign's ruleset first (2024 has e.g. Chromatic Orb), then the other.
+            active = str(_current_stats.get("ruleset") or "2014")
+            for rs in dict.fromkeys([active, "2024", "2014"]):
+                try:
+                    text = _lookup.lookup_with_level(srd, category=cat, level=level, ruleset=rs)
+                except Exception:
+                    text = None
+                if text:
+                    return {"found": True, "name": name, "category": cat,
+                            "text": text, "looked_up_as": srd, "ruleset": rs}
+    return None
+
+
 @app.route("/srd-lookup")
 def srd_lookup():
     """Look up a spell, item, condition, feature, or monster by name.
@@ -1501,6 +1538,11 @@ def srd_lookup():
         hit = _lookup_inventory_line(name, category, level)
         if hit:
             return jsonify(hit)
+    # German spell, feature and condition names ("Tanzende Lichter",
+    # "Kampfrausch", "Vergiftet") through config/rules-aliases.json.
+    hit = _lookup_rules_alias(name, category, level)
+    if hit:
+        return jsonify(hit)
     # Not found — offer near-miss "did you mean?" suggestions (typo recovery)
     # plus the wikidot fallback URL so the frontend can still link out.
     # `ref` is {} when there is no VERIFIED destination for this category, and

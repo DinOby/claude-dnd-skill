@@ -62,6 +62,18 @@ def german_aliases(config_dir: str) -> "dict[str, str]":
     return out
 
 
+def rules_aliases(config_dir: str) -> "dict[str, dict[str, str]]":
+    """German spell / feature / condition names (casefolded) → SRD name, per
+    dataset category ("spells", "features", "conditions") from rules-aliases.json."""
+    out: "dict[str, dict[str, str]]" = {"spells": {}, "features": {}, "conditions": {}}
+    data = _read_json(os.path.join(config_dir, "rules-aliases.json")) or {}
+    for section in out:
+        for german, srd in (data.get(section) or {}).items():
+            if isinstance(german, str) and isinstance(srd, str):
+                out[section][german.casefold()] = srd
+    return out
+
+
 def campaign_items(path: str) -> "dict[str, tuple[str, str]]":
     """items.md → {name casefolded: (name, description)}."""
     try:
