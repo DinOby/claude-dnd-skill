@@ -206,6 +206,13 @@ class DisplayRefreshTests(_GameBase):
         self.assertEqual(shown["Ilsa Morgentau"]["conditions"], ["poisoned"])
         self.assertEqual(shown["Brakka Steinfaust"]["sheet"], {"currency": "25 GM 3 SM 0 KM"})
 
+    def test_anzeige_from_the_sheets_includes_tracker_conditions(self):
+        rc, out = self.game("anzeige", "-c", "test", "--quelle", "bogen")
+        self.assertEqual(rc, 0, out)
+        shown = {p["name"]: p for p in self.pushes[-1]["players"]}
+        self.assertEqual(shown["Ilsa Morgentau"]["conditions"], ["poisoned"])
+        self.assertEqual(shown["Ilsa Morgentau"]["concentration"], "Bless")
+
     def test_single_flags_are_still_logged(self):
         res = self._push_stats("--player", "Ilsa", "--conditions-add", "Vergiftet")
         self.assertEqual(res.returncode, 0, res.stderr)

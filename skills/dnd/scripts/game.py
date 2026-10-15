@@ -422,11 +422,8 @@ def cmd_anzeige(args) -> int:
             sys.exit("Noch kein Import – nichts in der Engine (game.py import).")
         figures = list(engine_state.replay(events)["characters"].values())
     else:
-        figures = []
-        for path in sorted((d / "characters").glob("*.md")):
-            fig = sheet.parse(path.read_text(encoding="utf-8"))
-            fig["name"] = fig.get("name") or path.stem
-            figures.append(fig)
+        # sheets plus tracker.json (conditions, concentration) — the Markdown side
+        figures = list(_markdown_characters(d)[0].values())
     payload = {"players": [display_player(f) for f in figures]}
     shown = _display_push(payload)
     names = ", ".join(p["name"] for p in payload["players"])
