@@ -238,7 +238,36 @@ am Ende gleich – aber 9 Abweichungen aus vier Ursachen. Behoben vor S3b
   `click()`. Die neue Anforderung löst jetzt erst die Sperre und setzt Würfel und
   Vorteil direkt.
 
+**Probelauf ohne Spieler (15.10.2026, Kopie der Kampagne):** Zauber wirken,
+Stufenaufstieg über `game.py stufe`, Display-Neustart mit absichtlich veralteter
+Spielerliste (schrieb nichts ins Logbuch), Schaden, Heilung, Geld, Zustand, lange
+Rast → Abgleich **0 Abweichungen**. Dabei gefunden und behoben: `game.py anzeige`
+zeigte aus den Bögen keine Zustände aus `tracker.json`.
+
 ### S3b – TP, Zustände, Zauberplätze, Trefferwürfel, RK aus der Engine
+
+**Umgesetzt (Branch `s3b-engine-fuehrend`), Umfang auf Wunsch eingegrenzt:** TP
+und temporäre TP, Zustände, Konzentration, Effekte, Todesrettungswürfe,
+Zauberplätze. Trefferwürfel und RK bleiben vorerst bei S3a (Bogen + Logbuch).
+
+- `engine: an`: `game.py` (bogen, stufe) und `tracker.py` schreiben **zuerst ins
+  Logbuch**; klappt das nicht, ändert sich nichts. Danach Bogen und Display.
+- Neu `game.py bogen --schaden N / --heilung N` (temporäre TP zuerst, nicht
+  unter 0, nicht über das Maximum).
+- Engine-Block in jedem Bogen (`engine/lead.py`), mit Prüfsumme; die normalen
+  Zeilen (TP-Zeile, Zauberplatz-Tabelle) werden mitgeführt, damit alle anderen
+  Skripte weiterlesen können. `game.py bloecke` schreibt die Blöcke, `abgleich`
+  meldet fehlende, veraltete und von Hand geänderte Blöcke.
+- `tracker.json` bleibt als Arbeitsdatei für Effekt-Zeiten, aber Zustände,
+  Konzentration und Todesrettungswürfe kommen aus der Engine (sie gewinnt);
+  ein Eintrag pro Figur unter ihrem vollen Namen. Abweichung vom Plan: Die Datei
+  wird nicht umbenannt, sondern mitgeführt – so ist der Rückweg sofort möglich.
+- Ein Effekt, der beim `tick` abläuft, wird als `effect.end` geloggt (vorher
+  blieb er in der Engine stehen).
+- `send.py`/`push_stats.py` zeigen diese Werte nur noch an.
+- Rückweg: `game.py export`, dann Schalter auf `aus`/`schatten`.
+- Spieler-Endpunkte → Eingangsdatei: weiterhin offen (S6), das Display schreibt
+  ohnehin nicht ins Logbuch.
 
 - **Ändert:** Diese Werte nur noch per `game.py`; Display liest aus der Engine;
   Block im Bogen; Regel in `SKILL.md`; `tracker.json` wird abgelöst;

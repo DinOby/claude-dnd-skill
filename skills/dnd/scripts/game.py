@@ -26,6 +26,13 @@ Usage:
                              # level-up: the only way to change level, max HP, hit dice and slot totals
     python3 game.py anzeige  [-c CAMPAIGN] [--quelle engine|bogen]
                              # show the current values on the display — never logged, changes nothing
+    python3 game.py bloecke  [-c CAMPAIGN]   # S3b: engine values + generated block into every sheet
+    python3 game.py export   [-c CAMPAIGN]   # way back from 'engine: an': engine → sheets + tracker.json
+
+Stage S3b (engine: an): the engine leads hit points, temporary HP, conditions,
+concentration, death saves and spell slots. game.py writes the log FIRST and only
+then the sheet; if the log cannot be written nothing changes. bogen --schaden N /
+--heilung N compute the new HP (temporary HP first).
 
 Spell slots change only through game.py (bogen --platz/--zauber, stufe); the display
 paths (send.py --stat-slot-*, push_stats.py --slot-*) only show, they are not logged.
@@ -48,7 +55,7 @@ try:
 except Exception:
     pass
 
-from engine import PROTOCOL_VERSION, eventlog, importer, shadow, sheet   # noqa: E402
+from engine import PROTOCOL_VERSION, eventlog, importer, lead, shadow, sheet   # noqa: E402
 from engine import state as engine_state                           # noqa: E402
 from engine.textguard import clean_data                            # noqa: E402
 from paths import find_campaign, runtime_dir                       # noqa: E402
@@ -213,6 +220,8 @@ def cmd_abgleich(args) -> int:
     markdown, _ = _markdown_characters(d)
     baseline = clean_data({"c": importer.sheet_baseline(events)["characters"]})["c"]
     diffs = importer.compare(snapshot["characters"], markdown, baseline)
+    if shadow.engine_mode(d) == "an":
+        diffs += _block_diffs(d, snapshot)
     print(FRAME_OPEN)
     if diffs:
         print(f"Abgleich {d.name}: {len(diffs)} Abweichung(en) – nichts korrigiert.\n")
@@ -227,6 +236,54 @@ def cmd_abgleich(args) -> int:
         print(f"Abgleich {d.name}: Engine und Bögen stimmen überein.")
     print(FRAME_CLOSE)
     _report_skipped(skipped)
+    return 0
+
+
+def _block_diffs(d: pathlib.Path, snapshot: dict) -> "list[tuple]":
+    """S3b: every sheet must carry an intact, current engine block."""
+    out = []
+    for name, path in lead.sheet_paths(d).items():
+        text = path.read_text(encoding="utf-8")
+        status = lead.block_status(text)
+        fig = snapshot["characters"].get(name)
+        if status == lead.MISSING:
+            out.append((name, "Engine-Block", "–", "fehlt", "Block fehlt – game.py bloecke"))
+        elif status == lead.EDITED:
+            out.append((name, "Engine-Block", "–", "Prüfsumme falsch", importer.HAND))
+        elif fig is not None and lead.block_body(text) != lead.render_body(fig):
+            out.append((name, "Engine-Block", lead.render_body(fig), lead.block_body(text),
+                        "Block veraltet – game.py bloecke"))
+    return out
+
+
+def cmd_bloecke(args) -> int:
+    """S3b: write the engine values (HP, slots, block) into every sheet."""
+    d = _campaign_dir(args.campaign)
+    if shadow.engine_mode(d) != "an":
+        sys.exit("Nur bei 'engine: an' – im Schattenbetrieb führen die Bögen.")
+    if lead.snapshot(d) is None:
+        sys.exit("Noch kein Import – nichts in der Engine (game.py import).")
+    changed = lead.sync_sheets(d)
+    print("Engine-Blöcke geschrieben: " + (", ".join(changed) if changed else "alle schon aktuell") + ".")
+    return 0
+
+
+def cmd_export(args) -> int:
+    """Way back from 'engine: an': engine values into sheets and tracker.json, blocks removed.
+    Changes nothing in the log; afterwards the flag can go to 'aus' or 'schatten'."""
+    d = _campaign_dir(args.campaign)
+    if lead.snapshot(d) is None:
+        sys.exit("Noch kein Import – nichts zu exportieren.")
+    changed = lead.sync_sheets(d, with_block=False)
+    tracker_path = d / "tracker.json"
+    try:
+        tracker = json.loads(tracker_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tracker = {}
+    merged = lead.tracker_overlay(d, tracker if isinstance(tracker, dict) else {})
+    tracker_path.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
+    print("Exportiert: " + (", ".join(changed) if changed else "Bögen schon gleich") + " · tracker.json "
+          "aus der Engine geschrieben. Jetzt kann der Schalter auf 'aus' (oder 'schatten').")
     return 0
 
 
@@ -287,16 +344,31 @@ def _write_sheet(path: pathlib.Path, text: str) -> None:
 
 
 def _finish(d: pathlib.Path, path: pathlib.Path, name: str, new_text: str, events: list, src: str) -> int:
-    """Write the sheet, log the events, show the figure on the display."""
-    _write_sheet(path, new_text)
-    written = shadow.record(d, events, src=src)
+    """Log the events, write the sheet, show the figure on the display.
+
+    engine: an (S3b) — the log leads: it is written first, and when it cannot be
+    written nothing changes at all. Otherwise (schatten/aus) the sheet leads and
+    the log only follows, as before.
+    """
+    mode = shadow.engine_mode(d)
+    if mode == "an":
+        written = shadow.record(d, events, src=src)
+        if written != len(events):
+            sys.exit("Nichts geändert: Das Spielstand-Logbuch ließ sich nicht schreiben (engine: an). "
+                     "Gleich noch einmal versuchen; im Notfall Schalter auf 'aus' (siehe SKILL.md).")
+        _write_sheet(path, new_text)
+        lead.sync_sheets(d, [name])
+        fig = (lead.snapshot(d) or {}).get("characters", {}).get(name) or sheet.parse(new_text)
+    else:
+        _write_sheet(path, new_text)
+        written = shadow.record(d, events, src=src)
+        if mode == "aus":
+            print("(engine: aus – nichts ins Logbuch geschrieben)")
+        elif written != len(events):
+            print("⚠ Nicht alles ins Logbuch geschrieben – der Bogen ist trotzdem geändert.", file=sys.stderr)
+        fig = sheet.parse(new_text)
+    fig = dict(fig, name=name)
     print(f"Bogen {path.name} geändert: " + ", ".join(t for t, _ in events) + ".")
-    if shadow.engine_mode(d) == "aus":
-        print("(engine: aus – nichts ins Logbuch geschrieben)")
-    elif written != len(events):
-        print("⚠ Nicht alles ins Logbuch geschrieben – der Bogen ist trotzdem geändert.", file=sys.stderr)
-    fig = sheet.parse(new_text)
-    fig["name"] = name
     _display_push({"players": [display_player(fig)]})
     return 0
 
@@ -314,6 +386,21 @@ def cmd_bogen(args) -> int:
             hp, hp_max = _pair_arg(args.tp, "--tp")
         else:
             hp = int(args.tp)
+    if args.schaden or args.heilung:
+        if args.tp or args.temp is not None:
+            sys.exit("--schaden/--heilung nicht zusammen mit --tp/--temp angeben.")
+        if old.get("hp") is None:
+            sys.exit("Nichts geändert: Die TP-Zeile fehlt im Bogen.")
+        cur, temp_left = old["hp"], old.get("temp_hp") or 0
+        if args.schaden:                                    # temporary hit points go first
+            absorbed = min(temp_left, args.schaden)
+            if absorbed:
+                temp_left -= absorbed
+                args.temp = temp_left
+            cur = max(0, cur - (args.schaden - absorbed))
+        if args.heilung:
+            cur = min(old["hp_max"], cur + args.heilung)
+        hp = cur
     resources = {}
     for spec in args.ressource or []:
         if "=" not in spec:
@@ -478,6 +565,9 @@ def main(argv=None) -> int:
                    help="aus dem Inventar, genauer Wortlaut der Zeile (mehrfach möglich)")
     b.add_argument("--trefferwuerfel", type=int, metavar="N", help="verbleibende Trefferwürfel")
     b.add_argument("--platz", action="append", metavar="GRAD=FREI/MAX", help='Zauberplätze, z. B. "1=1/2"')
+    b.add_argument("--schaden", type=int, metavar="N",
+                   help="Schaden: erst temporäre TP, dann TP (nicht unter 0)")
+    b.add_argument("--heilung", type=int, metavar="N", help="Heilung: TP bis höchstens zum Maximum")
     b.add_argument("--zauber", action="append", type=int, metavar="GRAD",
                    help="einen Zauberplatz dieses Grades verbrauchen (mehrfach möglich)")
     b.add_argument("--zauber-zurueck", action="append", type=int, metavar="GRAD",
@@ -495,6 +585,10 @@ def main(argv=None) -> int:
                    help='Zauberplätze nach dem Aufstieg, z. B. "1=3/3" (neuer Grad wird ergänzt)')
     s.add_argument("--ep-schwelle", type=int, metavar="N",
                    help="EP für die nächste Stufe (Standard: aus der Tabelle)")
+    for name, text in (("bloecke", "S3b: Engine-Werte und Engine-Block in alle Bögen schreiben"),
+                       ("export", "Rückweg von 'engine: an': Engine-Werte in Bögen und tracker.json, Blöcke weg")):
+        x = sub.add_parser(name, help=text)
+        x.add_argument("-c", "--campaign", metavar="NAME")
     a = sub.add_parser("anzeige", help="aktuelle Werte ans Display (ändert nichts, schreibt nichts ins Logbuch)")
     a.add_argument("-c", "--campaign", metavar="NAME")
     a.add_argument("--quelle", choices=("engine", "bogen"),
@@ -521,6 +615,10 @@ def main(argv=None) -> int:
         return cmd_stufe(args)
     if args.cmd == "anzeige":
         return cmd_anzeige(args)
+    if args.cmd == "bloecke":
+        return cmd_bloecke(args)
+    if args.cmd == "export":
+        return cmd_export(args)
     p.print_help()
     return 0
 

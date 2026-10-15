@@ -79,22 +79,45 @@ def _state_path(campaign: str) -> str:
     return os.path.join(d, "tracker.json")
 
 
+def _engine_on(campaign: str) -> bool:
+    """engine: an (stage S3b) — the engine leads conditions, concentration and death saves."""
+    if _shadow is None:
+        return False
+    try:
+        return _shadow.engine_mode(_find_campaign(campaign)) == "an"
+    except Exception:                              # noqa: BLE001
+        return False
+
+
 def _load(campaign: str) -> dict:
     path = _state_path(campaign)
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            state = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        state = {}
+    if _engine_on(campaign):
+        from engine import lead
+        state = lead.tracker_overlay(_find_campaign(campaign), state)
+    return state
 
 
 _saved = False   # set by _save(); main() records the command in shadow mode only then
+_pending = None  # engine: an — tracker.json is written only after the log took the change
+_expired: "list[tuple[str, str]]" = []   # (entity, effect) that a tick ended — logged as effect.end
+
+
+def _write_state(campaign: str, state: dict) -> None:
+    with open(_state_path(campaign), "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
 
 
 def _save(campaign: str, state: dict) -> None:
-    global _saved
-    with open(_state_path(campaign), "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+    global _saved, _pending
+    if _engine_on(campaign):
+        _pending = state
+    else:
+        _write_state(campaign, state)
     _saved = True
 
 
@@ -113,7 +136,7 @@ def _shadow_events(args) -> "list[tuple[str, dict]]":
                                       "duration": args.duration, "conc": args.conc.lower() == "conc"})]
         if args.action == "end":
             return [("effect.end", {"who": args.entity, "name": args.spell})]
-        return [("effect.tick", {"who": args.entity})]
+        return [("effect.tick", {"who": args.entity})] +             [("effect.end", {"who": who, "name": name}) for who, name in _expired]
     if args.cmd == "saves":
         return [("deathsave", {"who": args.entity, "result": args.action})]
     if args.cmd == "clear":
@@ -293,6 +316,7 @@ def cmd_effect(campaign: str, action: str, entity_name: str,
 
         all_expired = expired + time_expired
         ent["effects"] = kept
+        _expired.extend((entity_name, e["name"]) for e in all_expired)   # the log ends them too
 
         if not all_expired and not kept:
             # Nothing to report
@@ -540,8 +564,20 @@ def main() -> None:
     else:
         p.print_help()
 
-    if _saved and _shadow is not None:
-        _shadow.record(_find_campaign(args.campaign), _shadow_events(args), src="tracker")
+    if not (_saved and _shadow is not None):
+        return
+    d = _find_campaign(args.campaign)
+    events = _shadow_events(args)
+    written = _shadow.record(d, events, src="tracker")
+    if _pending is not None:                      # engine: an — log first, then tracker.json and sheets
+        if written != len(events):
+            print("  Nichts geändert: Das Spielstand-Logbuch ließ sich nicht schreiben (engine: an). "
+                  "Die Anzeige kann die Änderung schon zeigen – game.py anzeige stellt sie zurück.",
+                  file=sys.stderr)
+            sys.exit(1)
+        _write_state(args.campaign, _pending)
+        from engine import lead
+        lead.sync_sheets(d)
 
 
 if __name__ == "__main__":
