@@ -274,7 +274,10 @@ class ShadowModeTests(TempDir):
                                  "slot.use", "hitdice.use", "inventory.add", "xp.set",
                                  "inspiration.set", "turn.order"])
         d = _campaign(self.base)
-        self.assertEqual(shadow.record(d, events, src="push_stats"), len(events))
+        # Spell slots change only through game.py (Sitzung 3: counted twice) —
+        # the display path shows slot.use, the log leaves it out.
+        self.assertEqual(shadow.record(d, events, src="push_stats"), len(events) - 1)
+        self.assertNotIn("slot.use", [e["type"] for e in eventlog.read(d)[0]])
         self.assertEqual(eventlog.read(d)[1], [])
         self.assertEqual(shadow.events_from_payload({"turn_order": None}), [("turn.clear", {})])
 

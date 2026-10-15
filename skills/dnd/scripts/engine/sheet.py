@@ -159,12 +159,56 @@ def _coins_text(coins: dict) -> str:
     return " ".join(parts)
 
 
+def _slot_row_label(level: int) -> str:
+    return {1: "1st", 2: "2nd", 3: "3rd"}.get(level, f"{level}th")
+
+
+def _set_slot_row(text: str, level: int, used: int, total: Optional[int]) -> str:
+    """Set 'Used' (and 'Total' when given) of one spell-slot row; add the row when a new
+    level is given with its total. SheetError when there is no table to write into."""
+    start, end = _section_span(text, "Spell Slots")
+    body = text[start:end]
+    row = re.compile(rf"^(\|\s*{int(level)}(?:st|nd|rd|th|\.)?\s*\|\s*)(\d+)(\s*\|\s*)\d*(\s*\|)", re.MULTILINE)
+    m = row.search(body)
+    if m:
+        new_total = str(total) if total is not None else m.group(2)
+        body = body[:m.start()] + f"{m.group(1)}{new_total}{m.group(3)}{used}{m.group(4)}" + body[m.end():]
+    else:
+        if total is None:
+            raise SheetError(f"Zauberplatz-Zeile Grad {level} nicht im Abschnitt '## Spell Slots' gefunden")
+        rows = list(re.finditer(r"^\|.*\|[ \t]*$", body, re.MULTILINE))
+        if not rows:
+            raise SheetError("Im Abschnitt '## Spell Slots' steht keine Tabelle")
+        pos = rows[-1].end()
+        body = body[:pos] + f"\n| {_slot_row_label(int(level))} | {total} | {used} |" + body[pos:]
+    return text[:start] + body + text[end:]
+
+
 def change(text: str, *, hp: Optional[int] = None, hp_max: Optional[int] = None,
            temp: Optional[int] = None, currency: Optional[dict] = None,
            resources: Optional[dict] = None, inspiration: Optional[bool] = None,
            add: "tuple[str, ...]" = (), remove: "tuple[str, ...]" = (),
-           hit_dice: Optional[int] = None, slots: Optional[dict] = None) -> str:
-    """The sheet with the given values changed. Raises SheetError, never half-changes."""
+           hit_dice: Optional[int] = None, slots: Optional[dict] = None,
+           level: Optional[int] = None, hit_dice_total: Optional[int] = None,
+           xp_next: Optional[int] = None) -> str:
+    """The sheet with the given values changed. Raises SheetError, never half-changes.
+
+    slots: {level: used} or {level: (used, total)} — a total also changes the
+    'Total' column (level-up) and may add a row for a new spell level.
+    level / hit_dice_total / xp_next: only for game.py stufe (level-up).
+    """
+    if level is not None:
+        text, n = re.subn(r"(\*\*Level:\*\*\s*)\d+", lambda m: f"{m.group(1)}{int(level)}", text, count=1)
+        if not n:
+            raise SheetError("'**Level:**' nicht im Bogen gefunden")
+    if xp_next is not None:
+        text, n = re.subn(r"(\*\*XP:\*\*\s*\d+\s*/\s*)\d+[^\n|]*?(?=\s*(?:\||$))",
+                          lambda m: f"{m.group(1)}{int(xp_next)}", text, count=1, flags=re.MULTILINE)
+        if not n:
+            raise SheetError("'**XP:** … / …' nicht im Bogen gefunden")
+    if hit_dice_total is not None:
+        text = _sub_in_section(text, "Combat Stats", r"(\*\*Hit Dice:\*\*\s*)\d+(\s*d\d+\s*\(remaining:\s*\d+\))",
+                               lambda m: f"{m.group(1)}{int(hit_dice_total)}{m.group(2)}", "Die Trefferwürfel-Zeile")
     if hp is not None or hp_max is not None:
         def _hp(m):
             cur = hp if hp is not None else int(m.group(2))
@@ -209,11 +253,9 @@ def change(text: str, *, hp: Optional[int] = None, hp_max: Optional[int] = None,
         else:
             raise SheetError(f"Fähigkeit '{name}' nicht unter '## Features & Traits' gefunden")
         text = text[:start] + "\n".join(lines) + text[end:]
-    for level, used in (slots or {}).items():
-        text = _sub_in_section(
-            text, "Spell Slots",
-            rf"^(\|\s*{int(level)}(?:st|nd|rd|th|\.)?\s*\|\s*(\d+)\s*\|\s*)\d*(\s*\|)",
-            lambda m: f"{m.group(1)}{used}{m.group(3)}", f"Zauberplatz-Zeile Grad {level}")
+    for slot_level, value in (slots or {}).items():
+        used, total = value if isinstance(value, tuple) else (value, None)
+        text = _set_slot_row(text, int(slot_level), int(used), total)
     for item in remove:
         start, end = _section_span(text, "Equipment & Inventory")
         lines = text[start:end].split("\n")

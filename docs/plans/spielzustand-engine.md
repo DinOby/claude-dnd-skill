@@ -213,6 +213,31 @@ geteilt.
 - **Spielabend danach:** ja, Schattenbetrieb. **Danach Stopp** bis zum OK für S3b.
 - **Kosten:** 0 €. Abo: leicht höher (ein Aufruf mehr pro Bogenänderung).
 
+**Ergebnis des Spielabends nach S3a (15.10.2026):** 156 Einträge, keine kaputte
+Zeile, keine einzige Warnung „nicht mitgeschrieben“, TP/Zustände/Geld/Inspiration/EP
+am Ende gleich – aber 9 Abweichungen aus vier Ursachen. Behoben vor S3b
+(Branch `s3a-fixes`):
+
+- **(a) Zauberplätze doppelt gezählt** (`game.py bogen --platz` und
+  `send.py --stat-slot-use` buchten denselben Zauber): Die Anzeige-Wege
+  (`send.py`, `push_stats.py`) schreiben Zauberplätze nie mehr ins Logbuch.
+  Zauber wirken: `game.py bogen FIGUR --zauber GRAD` (Bogen + Logbuch + Anzeige).
+- **(b) Stufenaufstieg nur von Hand:** neu `game.py stufe` (Stufe, max./akt. TP,
+  Trefferwürfel gesamt/übrig, Zauberplatz-Maxima inkl. neuem Grad, EP-Schwelle;
+  Ereignisse `level.set`, `hitdice.set`). `--platz` kann das Maximum erhöhen.
+  `xp.py` schreibt die Schwelle, die auf dem Bogen steht, auch ins Logbuch und
+  aufs Display (900 statt 300 nach dem Überschreiten).
+- **(c) Display-Neuaufbau schrieb Werte:** `push_stats.py --json` (Laden,
+  Neustart) wird nie mitgeschrieben; nur Einzel-Flags. Neu `game.py anzeige`:
+  zeigt die aktuellen Werte (Engine oder Bögen) an, schreibt nichts.
+- **(d) Geld als Inventarzeile:** `send.py`/`push_stats.py` weisen Münzzeilen
+  ab, das Logbuch nimmt sie nie auf, das Display verschiebt alte Münzzeilen
+  in eine eigene Zeile „Geld: …“ (`sheet.currency`).
+- **(e) Würfelfenster nahm den falschen Würfel:** Nach einem angeforderten Wurf
+  blieb das Fenster auf seinen Würfel gesperrt; ein gesperrter Knopf ignoriert
+  `click()`. Die neue Anforderung löst jetzt erst die Sperre und setzt Würfel und
+  Vorteil direkt.
+
 ### S3b – TP, Zustände, Zauberplätze, Trefferwürfel, RK aus der Engine
 
 - **Ändert:** Diese Werte nur noch per `game.py`; Display liest aus der Engine;

@@ -399,14 +399,19 @@ def main() -> None:
         sys.exit(1)
 
     payload: dict = {}
+    recorded: dict = {}   # only the per-flag changes go into the game log (see _shadow_record)
 
     # ── Full JSON passthrough ──────────────────────────────────────────────────
+    # A display refresh (campaign load, restart): shown, never logged as a change.
     if args.json:
         try:
             payload = json.loads(args.json)
         except json.JSONDecodeError as e:
             print(f"Invalid JSON: {e}", file=sys.stderr)
             sys.exit(1)
+        for player in payload.get("players") or []:
+            if isinstance(player, dict):
+                _coins_out_of_inventory(player)
 
     # ── Per-player shorthands ──────────────────────────────────────────────────
     _player_flags = (
@@ -461,6 +466,7 @@ def main() -> None:
             except json.JSONDecodeError as e:
                 print(f"Invalid sheet JSON: {e}", file=sys.stderr)
                 sys.exit(1)
+            _coins_out_of_inventory(player_update)
         if args.ability_scores is not None:
             try:
                 raw = json.loads(args.ability_scores)
@@ -486,15 +492,18 @@ def main() -> None:
                 sys.exit(1)
         if args.inspiration is not None:
             player_update["inspiration"] = args.inspiration.lower() in ("true", "1", "yes")
-        if args.inventory_add:
-            player_update["_inventory_add"] = args.inventory_add
-        if args.inventory_remove:
-            player_update["_inventory_remove"] = args.inventory_remove
+        for item, key in ((args.inventory_add, "_inventory_add"), (args.inventory_remove, "_inventory_remove")):
+            if item and _is_coin_line(item):
+                print(f"push_stats: '{item}' ist Geld, kein Gegenstand – nicht gesendet. "
+                      f"Geld ändert sich mit game.py bogen FIGUR --muenzen.", file=sys.stderr)
+            elif item:
+                player_update[key] = item
         if args.hit_dice_use:
             player_update["_hd_use"] = 1
         if args.hit_dice_restore:
             player_update["_hd_restore"] = args.hit_dice_restore
         payload.setdefault("players", []).append(player_update)
+        recorded.setdefault("players", []).append(player_update)
 
     # ── Factions ───────────────────────────────────────────────────────────────
     if args.factions is not None:
@@ -531,6 +540,9 @@ def main() -> None:
 
     if args.turn_clear:
         payload["turn_order"] = None
+
+    if args.turn_order or args.turn_current or args.turn_round or args.turn_clear:
+        recorded["turn_order"] = payload["turn_order"]
 
     # ── Replace-players flag ───────────────────────────────────────────────────
     if args.replace_players:
@@ -588,12 +600,41 @@ def main() -> None:
         sys.exit(rc)
 
     _send(FLASK_URL, json.dumps(payload).encode("utf-8"), _read_token())
-    _shadow_record(payload)
+    if recorded:
+        _shadow_record(recorded)
     sys.exit(rc)
 
 
+def _is_coin_line(text: str) -> bool:
+    try:
+        from engine.coins import is_coin_line
+    except Exception:                             # noqa: BLE001 — never block a display push
+        return False
+    return is_coin_line(text)
+
+
+def _coins_out_of_inventory(player: dict) -> None:
+    """Money is never an inventory line: move coin lines of sheet.inventory to sheet.currency."""
+    sheet = player.get("sheet")
+    if not isinstance(sheet, dict) or not isinstance(sheet.get("inventory"), list):
+        return
+    try:
+        from engine.coins import split_coins
+    except Exception:                             # noqa: BLE001
+        return
+    things, coins = split_coins(sheet["inventory"])
+    if coins:
+        sheet["inventory"] = things
+        sheet.setdefault("currency", coins[-1])
+
+
 def _shadow_record(payload: dict) -> None:
-    """Shadow mode (engine: schatten): also note the change in the game log. Never fails."""
+    """Shadow mode: note the per-flag changes in the game log. Never fails.
+
+    Only changes given as flags (--hp, --conditions-add, --turn-current …) are
+    logged. A --json payload is a display refresh (campaign load, restart,
+    game.py anzeige) and changes nothing in the game, so it is never logged.
+    """
     try:
         from engine import shadow
     except Exception as exc:                      # noqa: BLE001

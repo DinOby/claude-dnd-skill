@@ -1327,11 +1327,29 @@ def _persist_stats() -> None:
         pass
 
 
+def _coins_out_of_inventories(players) -> None:
+    """Money is never an inventory line (Sitzung 3): coin totals such as "31 GM 6 SM"
+    that reached a player's inventory move to sheet.currency (shown as its own line)."""
+    try:
+        from engine.coins import split_coins
+    except Exception:
+        return
+    for p in players or []:
+        sheet = p.get("sheet") if isinstance(p, dict) else None
+        if not isinstance(sheet, dict) or not isinstance(sheet.get("inventory"), list):
+            continue
+        things, coins = split_coins(sheet["inventory"])
+        if coins:
+            sheet["inventory"] = things
+            sheet.setdefault("currency", coins[-1])
+
+
 def _load_stats() -> None:
     global _expected_count
     try:
         with open(STATS_FILE, encoding="utf-8") as f:
             data = json.load(f)
+        _coins_out_of_inventories(data.get("players"))
         with _stats_lock:
             _current_stats.update(data)
         # Initialise expected player count from persisted stats so solo-mode
@@ -1897,6 +1915,7 @@ def stats():
                     existing_players.append(
                         {k: v for k, v in incoming.items() if k not in _MUTATION_KEYS}
                     )
+            _coins_out_of_inventories(existing_players)
 
         # turn_order: a full order replaces, a partial one (only "current" and/or
         # "round", from --turn-current / --turn-round) merges into the stored

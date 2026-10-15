@@ -266,9 +266,12 @@ def _write_char_xp(path: pathlib.Path, new_xp: int, current_level: int) -> bool:
     return leveled
 
 
-def _push_xp_display(char_name: str, new_xp: int, current_level: int) -> None:
-    """Push updated XP to the display sidebar (fire-and-forget)."""
-    next_lvl = _next_level_xp(current_level)
+def _push_xp_display(char_name: str, new_xp: int, next_lvl: int) -> None:
+    """Push updated XP to the display sidebar (fire-and-forget).
+
+    next_lvl is the threshold just written to the sheet — after crossing a level
+    that is the NEXT level's threshold (900, not 300), so sheet, display and log agree.
+    """
     subprocess.run(
         [sys.executable, str(DISPLAY_SCRIPT),
          "--player", char_name, "--xp", str(new_xp), str(next_lvl)],
@@ -357,7 +360,8 @@ def _record_award(campaign: str, entries: list, note: str) -> None:
     if _shadow is not None:
         _shadow.record(CAMPAIGNS_DIR / campaign,
                        [("xp.award", {"who": e["name"], "awarded": e["awarded"],
-                                      "total_after": e["total_after"], "note": note})
+                                      "total_after": e["total_after"], "note": note,
+                                      **({"next": e["next"]} if e.get("next") is not None else {})})
                         for e in entries],
                        src="xp")
 
@@ -487,9 +491,10 @@ def cmd_award(args: argparse.Namespace) -> None:
         old_xp  = c["xp"]
         new_xp  = old_xp + per_player
         leveled = _write_char_xp(c["path"], new_xp, c["level"])
-        _push_xp_display(c["name"], new_xp, c["level"])
+        written_next = _next_level_xp(c["level"] + 1 if leveled else c["level"])
+        _push_xp_display(c["name"], new_xp, written_next)
         _ledger_entries.append({"name": c["name"], "awarded": per_player,
-                                "total_after": new_xp})
+                                "total_after": new_xp, "next": written_next})
 
         next_lvl   = _next_level_xp(c["level"])
         up_tag     = f"  ⚠ LEVEL {c['level'] + 1} UP!" if leveled else ""

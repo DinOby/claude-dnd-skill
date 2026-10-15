@@ -271,6 +271,14 @@ def _shadow_record(payload: dict) -> None:
     shadow.record(shadow.active_campaign_dir(), shadow.events_from_payload(payload), src="send")
 
 
+def _is_coin_line(text: str) -> bool:
+    try:
+        from engine.coins import is_coin_line
+    except Exception:                             # noqa: BLE001 — never block a send
+        return False
+    return is_coin_line(text)
+
+
 def _build_stats_payload(args) -> "dict | None":
     """Build a push_stats-compatible payload from --stat-* flags."""
     players: "dict[str, dict]" = {}
@@ -334,19 +342,18 @@ def _build_stats_payload(args) -> "dict | None":
             name, spell = spec[:idx], spec[idx + 1:]
             _p(name)["concentration"] = spell.strip() or None
 
-    for spec in (args.stat_inventory_add or []):
-        idx = spec.find(":")
-        if idx > 0:
-            name, item = spec[:idx], spec[idx + 1:]
-            if item.strip():
-                _p(name)["_inventory_add"] = item.strip()
-
-    for spec in (args.stat_inventory_remove or []):
-        idx = spec.find(":")
-        if idx > 0:
-            name, item = spec[:idx], spec[idx + 1:]
-            if item.strip():
-                _p(name)["_inventory_remove"] = item.strip()
+    for flag, key in ((args.stat_inventory_add, "_inventory_add"),
+                      (args.stat_inventory_remove, "_inventory_remove")):
+        for spec in (flag or []):
+            idx = spec.find(":")
+            if idx > 0:
+                name, item = spec[:idx], spec[idx + 1:]
+                if item.strip() and _is_coin_line(item.strip()):
+                    # Money is never an inventory line; the narration still goes out.
+                    print(f"send.py: '{item.strip()}' ist Geld, kein Gegenstand – nicht gesendet. "
+                          f"Geld ändert sich mit game.py bogen FIGUR --muenzen.", file=sys.stderr)
+                elif item.strip():
+                    _p(name)[key] = item.strip()
 
     for spec in (args.effect_start or []):
         # Format: NAME:SPELL:DURATION[:conc]

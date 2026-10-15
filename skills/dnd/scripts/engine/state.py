@@ -148,6 +148,17 @@ def _apply_figure(fig: dict, t: str, d: dict) -> None:
         hd = fig["hit_dice"]
         delta = -d["n"] if t == "hitdice.use" else d["n"]
         hd["remaining"] = max(0, min(hd["total"], hd["remaining"] + delta))
+    elif t == "hitdice.set":
+        hd = dict(fig.get("hit_dice") or {"die": d.get("die") or "d8", "total": 0, "remaining": 0})
+        if d.get("die"):
+            hd["die"] = d["die"]
+        hd["total"] = d["total"]
+        hd["remaining"] = max(0, min(d["total"], d["remaining"]))
+        fig["hit_dice"] = hd
+    elif t == "level.set":
+        fig["level"] = d["level"]
+        if "xp_next" in d:
+            fig["xp_next"] = d["xp_next"]
     elif t == "inventory.add":
         fig["inventory"].setdefault("Neu", []).append(d["item"])
     elif t == "inventory.remove":
@@ -162,6 +173,8 @@ def _apply_figure(fig: dict, t: str, d: dict) -> None:
             fig["xp_next"] = d["next"]
     elif t == "xp.award" and "total_after" in d:
         fig["xp"] = d["total_after"]
+        if "next" in d:
+            fig["xp_next"] = d["next"]
     elif t == "inspiration.set":
         fig["inspiration"] = d["value"]
     elif t == "feature.set":

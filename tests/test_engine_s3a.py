@@ -50,8 +50,6 @@ class SendPathTests(unittest.TestCase):
     FLAGS = [   # (argv, expected (type, data))
         (["--stat-hp", "Grosch:6:14"], ("hp.set", {"who": "Grosch", "current": 6, "max": 14})),
         (["--stat-temp-hp", "Grosch:2"], ("hp.temp", {"who": "Grosch", "value": 2})),
-        (["--stat-slot-use", "Mordos:1"], ("slot.use", {"who": "Mordos", "level": 1})),
-        (["--stat-slot-restore", "Mordos:1"], ("slot.restore", {"who": "Mordos", "level": 1})),
         (["--stat-condition-add", "Zarith:Vergiftet"], ("condition.add", {"who": "Zarith", "name": "Vergiftet"})),
         (["--stat-condition-remove", "Zarith:Vergiftet"], ("condition.remove", {"who": "Zarith", "name": "Vergiftet"})),
         (["--stat-concentrate", "Mordos:Segnen"], ("concentration.set", {"who": "Mordos", "spell": "Segnen"})),

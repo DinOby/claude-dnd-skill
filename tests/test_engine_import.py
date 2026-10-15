@@ -107,6 +107,10 @@ class Base(unittest.TestCase):
         self.runtime = self.base / ".runtime"
         self.runtime.mkdir()
         (self.runtime / "stats.json").write_text('{"players": []}', encoding="utf-8")
+        # game.py shows its changes on the display; tests record the pushes instead.
+        env = mock.patch.dict(os.environ, {"DND_GAME_NO_DISPLAY": "1"})
+        env.start()
+        self.addCleanup(env.stop)
 
     def game(self, *argv):
         import importlib.util

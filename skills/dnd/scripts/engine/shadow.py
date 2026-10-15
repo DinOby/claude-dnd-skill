@@ -6,8 +6,14 @@ first and never depends on this: any failure here (no campaign, lock busy, bad
 data, disk) becomes one warning on stderr and the script carries on.
 
 A script that calls push_stats.py for its own display update (tracker.py,
-xp.py) has already recorded the change; it passes child_env() so the
+xp.py, game.py) has already recorded the change; it passes child_env() so the
 push_stats.py child does not record it a second time.
+
+One path per value (after the Sitzung-3 test evening): the display paths
+(send.py, push_stats.py) never log spell slots — those change only through
+game.py (bogen --platz/--zauber, stufe), which also updates the display. With
+`engine: an` the display paths log none of the values the engine leads
+(ENGINE_LED); they only show them. Coin totals are never logged as items.
 """
 
 import os
@@ -18,6 +24,22 @@ from typing import Iterable, Optional
 
 ENV_PARENT = "DND_SHADOW_PARENT"
 MODES = ("aus", "schatten", "an")
+
+DISPLAY_SOURCES = ("send", "push_stats")
+SLOT_TYPES = ("slots.set", "slot.use", "slot.restore")
+ENGINE_LED = ("hp.set", "hp.temp", "condition.set", "condition.add", "condition.remove",
+              "condition.clear", "concentration.set", "effect.start", "effect.end", "effect.tick",
+              "deathsave", "hitdice.use", "hitdice.restore", "hitdice.set") + SLOT_TYPES
+"""Values the engine leads from S3b on (plan: "Werte und ihre Quelle"). With `engine: an`
+only game.py and the engine-side scripts may change them."""
+
+
+def display_filter(events: "list[tuple[str, dict]]", src: str, mode: str) -> "list[tuple[str, dict]]":
+    """The events a display path (send/push_stats) may log; other sources pass unchanged."""
+    if src not in DISPLAY_SOURCES:
+        return events
+    blocked = set(ENGINE_LED) if mode == "an" else set(SLOT_TYPES)
+    return [(t, d) for t, d in events if t not in blocked]
 
 _FLAG_RE = re.compile(r"^\s*[-*]?\s*\**engine\**\s*:\s*\**\s*(aus|schatten|an)\b", re.IGNORECASE | re.MULTILINE)
 
@@ -63,7 +85,11 @@ def record(campaign_dir, events: "Iterable[tuple[str, dict]]", src: str, by: str
             return 0
         if not pathlib.Path(campaign_dir).is_dir():
             return 0
-        if engine_mode(campaign_dir) == "aus":
+        mode = engine_mode(campaign_dir)
+        if mode == "aus":
+            return 0
+        events = display_filter(events, src, mode)
+        if not events:
             return 0
         from engine import eventlog
         written = 0
@@ -148,10 +174,11 @@ def events_from_player(update: dict) -> "list[tuple[str, dict]]":
         out.append(("hitdice.use", {"who": who, "n": _int(update["_hd_use"])}))
     if _int(update.get("_hd_restore")):
         out.append(("hitdice.restore", {"who": who, "n": _int(update["_hd_restore"])}))
-    if update.get("_inventory_add"):
-        out.append(("inventory.add", {"who": who, "item": str(update["_inventory_add"])}))
-    if update.get("_inventory_remove"):
-        out.append(("inventory.remove", {"who": who, "item": str(update["_inventory_remove"])}))
+    from engine.coins import is_coin_line
+    for key, etype in (("_inventory_add", "inventory.add"), ("_inventory_remove", "inventory.remove")):
+        item = update.get(key)
+        if item and not is_coin_line(str(item)):            # money is never an item
+            out.append((etype, {"who": who, "item": str(item)}))
     xp = update.get("xp")
     if isinstance(xp, dict) and _int(xp.get("current")) is not None:
         data = {"who": who, "current": _int(xp["current"])}

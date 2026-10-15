@@ -1080,6 +1080,9 @@
   .sm-inventory-list {
     list-style: none; column-count: 2; column-gap: 24px;
   }
+  .sm-currency {
+    font-size: 12px; color: rgba(220,200,160,0.85); margin: 2px 0 6px;
+  }
   .sm-inventory-list li {
     font-size: 12px; color: rgba(200,185,150,0.7);
     padding: 2px 0; break-inside: avoid;
@@ -5888,16 +5891,22 @@ function openSheet(name) {
     });
   }
 
-  // Inventory
-  if (sheet.inventory && sheet.inventory.length) {
+  // Inventory — money is its own line (sheet.currency), never an inventory item
+  if ((sheet.inventory && sheet.inventory.length) || sheet.currency) {
     content.appendChild(_smDivider());
     const title = document.createElement('div');
     title.className = 'sm-section-title';
     title.innerHTML = '<img src="/icons/pack.png" class="sheet-section-icon" alt="">Inventory';
     content.appendChild(title);
+    if (sheet.currency) {
+      const money = document.createElement('div');
+      money.className = 'sm-currency';
+      money.textContent = 'Geld: ' + String(sheet.currency);
+      content.appendChild(money);
+    }
     const list = document.createElement('ul');
     list.className = 'sm-inventory-list';
-    sheet.inventory.forEach(item => {
+    (sheet.inventory || []).forEach(item => {
       const li = document.createElement('li');
       li.textContent = item;
       li.dataset.srdName = item; li.dataset.srdCategory = 'item';
@@ -8297,15 +8306,28 @@ function _initDicePad() {
 
     _activeRequestId = String(req.request_id || '');
 
-    // Spec → click the matching die button. If unknown, fall back to d20.
-    const reqSpec = (req.spec || '1d20').toLowerCase();
-    const dieBtn  = document.querySelector(`.dp-die[data-spec="${reqSpec}"]`)
+    // Release the previous prescribed roll first. After a roll the pad stays
+    // locked to its die, and a disabled button ignores click() — so a request
+    // for another die kept the old one (Sitzung 3: d12 instead of d20 on the
+    // shared screen, d20 instead of d8). Then select die and adv directly.
+    if (_locked) _setLocked(false);
+
+    // Spec → the matching die button. If unknown, fall back to d20.
+    const dieBtn  = document.querySelector(`.dp-die[data-spec="${(req.spec || '1d20').toLowerCase()}"]`)
                  || document.querySelector('.dp-die[data-spec="1d20"]');
-    if (dieBtn) dieBtn.click();
+    const reqSpec = dieBtn ? dieBtn.dataset.spec : '1d20';
+    document.querySelectorAll('#dp-die-row .dp-die').forEach(b => b.classList.remove('active'));
+    if (dieBtn) dieBtn.classList.add('active');
+    spec = reqSpec;
+    if (!reel.classList.contains('spinning')) reel.textContent = spec.replace('1d', 'd');
+    _syncAdvAvailability();
 
     // Adv/dis (only meaningful on 1d20; _syncAdvAvailability gates the rest).
-    const advBtn = document.querySelector(`.dp-adv[data-adv="${req.advantage || 'normal'}"]`);
-    if (advBtn && !advBtn.hasAttribute('disabled')) advBtn.click();
+    const reqAdv = (spec === '1d20') ? (req.advantage || 'normal') : 'normal';
+    const advBtn = document.querySelector(`.dp-adv[data-adv="${reqAdv}"]`);
+    document.querySelectorAll('.dp-adv').forEach(b => b.classList.remove('active'));
+    if (advBtn) advBtn.classList.add('active');
+    adv = advBtn ? reqAdv : 'normal';
 
     // Modifier — jump straight to the requested value rather than +/- ticking.
     mod = Math.max(-30, Math.min(30, Number(req.modifier) || 0));
@@ -8328,7 +8350,7 @@ function _initDicePad() {
     if (navigator.vibrate) navigator.vibrate([20, 60, 20]);
 
     // Lock everything except the prescribed die + adv button + Roll.
-    _setLocked(true, reqSpec, (req.advantage || 'normal'));
+    _setLocked(true, reqSpec, adv);
 
     // Pull the player to the Roll tab so they don't miss the request. If they
     // were already on Roll, this is a no-op; if they were on Move, the tab

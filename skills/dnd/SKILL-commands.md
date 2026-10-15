@@ -121,7 +121,7 @@ Full step-by-step procedures for all `/dm:dnd` slash commands. Load this file at
    - **source/<chapter-id>.md (imported campaigns only):** the full module text, one file per chapter. Never loaded at session start. Before running a scene in a chapter, read that chapter's `source/<id>.md` (the `source_ref` in the arc) — and only that chapter. This is the predefined-story equivalent of reading a single NPC's full entry on demand.
    - **npcs.md:** Index row only at load. **Before writing substantive dialogue or decisions for any named NPC, read their full entry in `npcs-full.md`.** Do not wait for an explicit `/dm:dnd npc [name]` call — do it proactively when a scene centers on that character. Index rows carry surface traits only; personality axes, relationships, and hidden goals are in the full entry.
    - **Do NOT read session-log.md at load** — recent events are already in `state.md → ## Recent Events`. Only read session-log.md if the player explicitly requests a recap, or if DM Calibration from the last 1-2 sessions is needed and not already internalized.
-6. Push full party stats to display sidebar. **CRITICAL:** use `--json` with a complete player object — **never** the `--player` shorthand here. `--player` only updates existing fields; it cannot populate the card or sheet tabs. The display shows "Full sheet not loaded" when `sheet` is absent.
+6. Push full party stats to display sidebar (a display refresh — never logged; with `engine: schatten`/`an` follow it with `game.py anzeige -c <campaign>` so the display shows the current sheet/engine values; never put coin totals into `sheet.inventory` — use `"currency"` inside `sheet`, e.g. `"currency": "31 GM 6 SM"`). **CRITICAL:** use `--json` with a complete player object — **never** the `--player` shorthand here. `--player` only updates existing fields; it cannot populate the card or sheet tabs. The display shows "Full sheet not loaded" when `sheet` is absent.
 
    ```bash
    python3 ${CLAUDE_SKILL_DIR}/display/push_stats.py --replace-players --json '{
@@ -630,6 +630,8 @@ Read `characters/<name>.md`, display cleanly. If name omitted and one character 
 
    Insufficient XP → report deficit and stop. Only continue on explicit DM override.
 2. Read sheet. Run `character.py levelup`. Apply class features. Ask for HP roll or average. Update sheet + global roster. Narrate the growth.
+
+   **With `engine: schatten` or `an`:** the numbers go only through `python3 ${CLAUDE_SKILL_DIR}/scripts/game.py stufe -c <campaign> "<PC>" --stufe N --tp-max M [--tp AKT] [--trefferwuerfel-max N] [--trefferwuerfel N] [--platz "GRAD=FREI/MAX" …] [--ep-schwelle N]` — level, max/current HP, hit dice, slot totals (a new spell level gets its row) and the XP threshold, on the sheet and in the log at once, shown on the display. Never edit these by hand. New features, spells and metamagic are text — add them to the sheet directly.
 
    **Ruleset-aware subclass timing (added 2026-05-08):** read campaign ruleset via `paths.campaign_ruleset(<campaign>)`.
    - **2014:** Subclass selection happens at the class's specified level (Cleric/Sorcerer/Warlock at 1; Druid/Wizard at 2; most others at 3).
