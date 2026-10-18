@@ -294,8 +294,10 @@ def cmd_calc(args: argparse.Namespace) -> None:
             sys.exit(1)
         raw_xp, mult, adj_xp = _calc_monster_xp(monsters)
         total_count = sum(c for _, _, c in monsters)
-        per_player  = adj_xp // players
-        diff        = _classify_difficulty(per_player, level)
+        # The multiplier only rates difficulty (DMG); the XP awarded is the raw
+        # monster XP. Awarding the adjusted value doubled a solo fight's XP.
+        per_player  = raw_xp // players
+        diff        = _classify_difficulty(adj_xp // players, level)
 
         print(f"\n  Combat encounter — CR-based calculation")
         for name, cr, count in monsters:
@@ -461,13 +463,14 @@ def cmd_award(args: argparse.Namespace) -> None:
             sys.exit(1)
         raw_xp, mult, adj_xp = _calc_monster_xp(monsters)
         total_count = sum(c for _, _, c in monsters)
-        per_player  = adj_xp // players
-        diff        = _classify_difficulty(per_player, avg_level)
+        # Raw XP is awarded; the multiplied value only rates difficulty.
+        per_player  = raw_xp // players
+        diff        = _classify_difficulty(adj_xp // players, avg_level)
 
         print(f"\n  Combat — CR-based  [{total_count} monsters, ×{mult} multiplier]")
         for name, cr, count in monsters:
             print(f"    {count}× {name} (CR {cr}): {CR_XP[cr] * count:,} XP")
-        print(f"  Raw {raw_xp:,} × {mult} = Adjusted {adj_xp:,} | Difficulty: {diff.upper()}")
+        print(f"  Awarded {raw_xp:,} XP (raw) | difficulty rated on {raw_xp:,} × {mult} = {adj_xp:,}: {diff.upper()}")
         print(f"  Per player: {per_player:,} XP")
 
     else:
@@ -512,6 +515,29 @@ def cmd_award(args: argparse.Namespace) -> None:
         print("\n  Level-up pending — run /dnd character level-up")
 
 
+def cmd_correct(args: argparse.Namespace) -> None:
+    """Add or take back a fixed amount (e.g. an award that was calculated wrong).
+
+    Writes the sheet, the display and the ledger like `award`, so `check`
+    still reconciles. A negative amount never takes a character below 0.
+    """
+    try:
+        path = _find_char_path(args.campaign, args.character)
+    except FileNotFoundError as e:
+        print(f"  Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    xp, level = _read_char_state(path)
+    name = _sheet_title(path)
+    new_xp = max(0, xp + args.amount)
+    leveled = _write_char_xp(path, new_xp, level)
+    written_next = _next_level_xp(level + 1 if leveled else level)
+    _push_xp_display(name, new_xp, written_next)
+    _record_award(args.campaign, [{"name": name, "awarded": new_xp - xp,
+                                   "total_after": new_xp, "next": written_next}],
+                  note=f"correction: {args.note}")
+    print(f"  {name}: {xp:,} {args.amount:+,} = {new_xp:,} / {_next_level_xp(level):,}  ({args.note})")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -550,6 +576,12 @@ def main() -> None:
     award_p.add_argument("--note",       metavar="TEXT",
                          help="Brief label for this award (printed only, not stored)")
 
+    corr_p = sub.add_parser("correct", help="Add or take back a fixed XP amount (with a reason)")
+    corr_p.add_argument("--campaign", required=True, metavar="NAME")
+    corr_p.add_argument("--character", required=True, metavar="NAME")
+    corr_p.add_argument("--amount", required=True, type=int, help="e.g. -550")
+    corr_p.add_argument("--note", required=True, metavar="TEXT", help="why (kept in the ledger)")
+
     check_p = sub.add_parser(
         "check", help="Reconcile the award ledger against the character sheets")
     check_p.add_argument("--campaign", required=True, metavar="NAME")
@@ -559,6 +591,7 @@ def main() -> None:
     if   args.command == "calc":  cmd_calc(args)
     elif args.command == "award": cmd_award(args)
     elif args.command == "check": cmd_check(args)
+    elif args.command == "correct": cmd_correct(args)
     else:
         parser.print_help()
         sys.exit(0)

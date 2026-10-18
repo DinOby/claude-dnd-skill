@@ -486,8 +486,8 @@ def main() -> None:
     parser.add_argument("--wait", action="store_true",
         help='With --dice-request: block until every prescribed character has rolled '
              '(polls /dice-request/<id>). Exits non-zero on timeout.')
-    parser.add_argument("--wait-timeout", type=int, default=120, metavar="SECONDS",
-        help='Timeout for --wait (default 120s). On timeout, prints still-pending '
+    parser.add_argument("--wait-timeout", type=int, default=600, metavar="SECONDS",
+        help='Timeout for --wait (default 600s). On timeout, withdraws the request, prints still-pending '
              'characters to stderr and exits 2.')
 
     # ── Stat-change flags (Option B — bundled with narration) ─────────────────
@@ -601,8 +601,16 @@ def main() -> None:
                         last_pending = list(remaining)
                     time.sleep(0.5)
                 else:
+                    # Withdraw the request so the display does not keep showing
+                    # "Waiting on …" for a roll the DM has stopped waiting for.
+                    try:
+                        dreq = urllib.request.Request(status_url, headers=poll_headers, method="DELETE")
+                        urllib.request.urlopen(dreq, timeout=TIMEOUT, context=_SSL_CTX)
+                        withdrawn = " (request withdrawn — send it again if still needed)"
+                    except Exception:
+                        withdrawn = ""
                     print(f"send.py: timeout after {args.wait_timeout}s — still pending: "
-                          f"{', '.join(last_pending)}", file=sys.stderr)
+                          f"{', '.join(last_pending)}{withdrawn}", file=sys.stderr)
                     sys.exit(2)
 
         # If no other action requested, exit clean (don't fall through to stdin read).

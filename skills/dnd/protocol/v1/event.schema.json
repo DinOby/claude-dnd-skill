@@ -22,7 +22,7 @@
       "inventory.add", "inventory.remove",
       "xp.set", "xp.award",
       "inspiration.set", "feature.set",
-      "currency.set", "resource.set",
+      "currency.set", "resource.set", "ac.set",
       "turn.order", "turn.current", "turn.round", "turn.clear",
       "tracker.clear",
       "import"
@@ -31,6 +31,7 @@
   },
   "dataSchemas": {
     "hp.set":            {"type": "object", "required": ["who"], "properties": {"who": {"type": "string"}, "current": {"type": "integer"}, "max": {"type": "integer"}}},
+    "ac.set":            {"type": "object", "required": ["who", "value"], "properties": {"who": {"type": "string"}, "value": {"type": "integer", "minimum": 0, "maximum": 40}}},
     "hp.temp":           {"type": "object", "required": ["who", "value"], "properties": {"who": {"type": "string"}, "value": {"type": "integer", "minimum": 0}}},
     "condition.set":     {"type": "object", "required": ["who", "list"], "properties": {"who": {"type": "string"}, "list": {"type": "array", "items": {"type": "string"}}}},
     "condition.add":     {"type": "object", "required": ["who", "name"], "properties": {"who": {"type": "string"}, "name": {"type": "string"}}},

@@ -397,11 +397,14 @@ _SHELL_CHARS  = re.compile(r'[$`\\;|&><()\[\]{}!]')
 _CHAR_NAME_RE = re.compile(r"^\w[\w '\-]{0,48}\w$|^\w{1,2}$", re.UNICODE)
 
 
+PLAYER_INPUT_MAX = 1500  # characters per player action (party input, play-as)
+
+
 def _sanitize_input(text: str) -> str:
     """Strip control chars and shell metacharacters from player input text."""
     text = _SHELL_CHARS.sub("", text)
     text = _PRINTABLE.sub("", text)
-    return text[:500].strip()
+    return text[:PLAYER_INPUT_MAX].strip()
 
 
 def _char_ok(name: str, known: set) -> bool:
@@ -1102,6 +1105,9 @@ _client_chars: "dict[queue.Queue, str]" = {}
 # their own screen). They count as that character's device for dice routing
 # but stay main displays: they still get the battle map.
 _client_as: "set[queue.Queue]" = set()
+# Network address per connected client, so the DM can see when two different
+# devices play the same character (one of them picked the wrong "Playing as").
+_client_addr: "dict[queue.Queue, str]" = {}
 
 
 def _phone_present(char: str) -> bool:
@@ -1377,6 +1383,11 @@ _input_lock = threading.Lock()
 # send.py --wait polls GET /dice-request/<id> to know when the DM can move on.
 _dice_pending: dict = {}
 _dice_pending_lock = threading.Lock()
+# request_id → characters (lower-case) who already rolled for it. A second
+# device answering the same request (shared screen + the player's own page)
+# would otherwise add a second, different result to the DM's turn.
+_dice_answered: dict = {}
+_DICE_ANSWERED_MAX = 200
 
 
 def _dice_pending_snapshot() -> list:
@@ -1419,6 +1430,7 @@ def _broadcast(payload: dict) -> None:
             _clients.remove(q)
             _client_chars.pop(q, None)
             _client_as.discard(q)
+            _client_addr.pop(q, None)
 
 
 def _broadcast_main(payload: dict) -> None:
@@ -2917,7 +2929,7 @@ def player_input():
     import time
     data = request.get_json(force=True, silent=True) or {}
     character = str(data.get("character", "Party"))[:50]
-    text = str(data.get("text", ""))[:500]
+    text = str(data.get("text", ""))[:PLAYER_INPUT_MAX]
     hold = bool(data.get("hold", False))
 
     # Strip shell metacharacters — input is player dialogue/action, not commands
@@ -2968,6 +2980,11 @@ def player_dice():
     adv       = str(data.get("advantage", "normal")).strip().lower()
     label     = _sanitize_input(str(data.get("label", "")))[:60].strip()
     req_id    = str(data.get("request_id", "")).strip()[:24]
+
+    if req_id:
+        with _dice_pending_lock:
+            if character.lower() in _dice_answered.get(req_id, ()):
+                return jsonify({"error": "already rolled", "request_id": req_id}), 409
 
     m = re.fullmatch(r"(\d{1,2})d(\d{1,3})", spec)
     if not m:
@@ -3042,6 +3059,9 @@ def player_dice():
                 if matched is not None:
                     entry["chars"].discard(matched)
                     pending_changed = True
+                    _dice_answered.setdefault(req_id, set()).add(ci)
+                    while len(_dice_answered) > _DICE_ANSWERED_MAX:
+                        _dice_answered.pop(next(iter(_dice_answered)))
                     if not entry["chars"]:
                         _dice_pending.pop(req_id, None)
     if pending_changed:
@@ -3158,6 +3178,23 @@ def dice_request_status(request_id):
             "label": entry["meta"].get("label", ""),
             "started_at": entry["started_at"],
         }), 200
+
+
+@app.route("/play-as/conflicts", methods=["GET"])
+def play_as_conflicts():
+    """Characters that more than one device (network address) is playing right now.
+
+    {"mira": ["127.0.0.1", "100.64.0.7"]} — those devices all
+    get that character's whispers and roll dialogs, so one of them chose the
+    wrong "Playing as". check_input.py prints this for the DM every turn.
+    """
+    if not _host_ok():
+        return "Forbidden", 403
+    seen: "dict[str, set]" = {}
+    with _clients_lock:
+        for q, ch in _client_chars.items():
+            seen.setdefault(ch, set()).add(_client_addr.get(q, ""))
+    return jsonify({ch: sorted(a) for ch, a in seen.items() if len(a) > 1}), 200
 
 
 @app.route("/dice-request/<request_id>", methods=["DELETE"])
@@ -3286,10 +3323,18 @@ def stage_input():
     ready = data.get("ready", True) is not False
 
     with _staged_lock:
+        # One action per character waits here until everyone is ready. If another
+        # device already sent one for this character, a second device almost
+        # always picked the wrong name tab: refuse instead of silently replacing
+        # the other player's action. The same device may still correct its own.
+        prev = _staged.get(character)
+        if prev and prev.get("device") and device_id and prev["device"] != device_id                 and not data.get("replace"):
+            return jsonify({"error": "taken", "character": character}), 409
         _staged[character] = {
             "text":      text,
             "ready":     ready,
             "timestamp": _time.time(),
+            "device":    device_id,
         }
         snap = _staged_snapshot()
 
@@ -3564,6 +3609,8 @@ def stream():
             if _as:
                 _client_chars[q] = _as
                 _client_as.add(q)
+        if q in _client_chars:
+            _client_addr[q] = request.remote_addr or ""
 
     # Send the current scene immediately on connect so the browser
     # starts with the right background even mid-session.
@@ -3660,6 +3707,7 @@ def stream():
                     pass
                 _client_chars.pop(q, None)
                 _client_as.discard(q)
+                _client_addr.pop(q, None)
 
     resp = Response(
         generate(),

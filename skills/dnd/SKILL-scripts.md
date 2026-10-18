@@ -83,7 +83,9 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award \
 **Encounter types:** `combat` `noncombat` (both use the same difficulty threshold table)
 **Monster CR formats:** `1/4`, `0.25`, `1/2`, `0.5`, `1/8`, `0.125`, or integer (`1`, `5`, `10`)
 **Monster count:** omit for 1 (e.g. `"dragon:10"`); explicit for groups (e.g. `"goblin:1/4:3"`)
-**Monster multiplier** (applied automatically): ×1 (1), ×1.5 (2), ×2 (3–6), ×2.5 (7–10), ×3 (11–14), ×4 (15+)
+**Monster multiplier** ×1 (1), ×1.5 (2), ×2 (3–6), ×2.5 (7–10), ×3 (11–14), ×4 (15+) — only rates the difficulty; the XP awarded is the raw monster XP split among the characters.
+
+**Correcting an award:** `xp.py correct --campaign <name> --character "<PC>" --amount -50 --note "why"` (sheet, display and ledger together).
 
 `award` updates the character file XP field, flags LEVEL UP PENDING if a threshold is crossed, and pushes XP to the display via `push_stats.py`. The `--note` label prints to terminal only — not stored.
 

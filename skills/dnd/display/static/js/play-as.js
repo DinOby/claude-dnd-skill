@@ -75,24 +75,35 @@
     if (!ctrls || document.getElementById('playas-row')) return;
     const row = el('div', 'audio-row');
     row.id = 'playas-row';
-    row.title = 'The character you play on this screen: the DM\'s rolls for them open here, '
-      + 'and party input starts on them. Click to cycle; the page reloads.';
+    row.title = 'The character you play on this screen: the DM rolls and secret messages '
+      + 'for them arrive here, and party input sends as them. The page reloads after a change.';
     row.appendChild(el('span', 'audio-label', 'Playing as'));
-    const label = el('span', 'speed-label', playAs || 'Nobody');
-    label.id = 'playas-label';
-    row.appendChild(label);
+    // A real list instead of click-to-cycle: cycling made it easy to land on
+    // someone else's character and read their secrets without noticing.
+    const select = el('select', 'playas-select');
+    select.id = 'playas-select';
+    row.appendChild(select);
     const anchor = document.getElementById('sfx-row');
     ctrls.insertBefore(row, anchor || null);
-    let timer = null;
-    row.addEventListener('click', () => {
-      const names = [''].concat(party);
-      const current = (label.dataset.value != null ? label.dataset.value : playAs).toLowerCase();
-      const i = names.findIndex(n => n.toLowerCase() === current);
-      const next = names[(i + 1) % names.length] || '';
-      label.dataset.value = next;
-      label.textContent = next || 'Nobody';
-      clearTimeout(timer);
-      timer = setTimeout(() => { store(next); location.reload(); }, 900);
+    fillSelect();
+    select.addEventListener('change', () => { store(select.value); location.reload(); });
+  }
+
+  function fillSelect() {
+    const select = document.getElementById('playas-select');
+    if (!select) return;
+    const names = party.slice();
+    if (playAs && !names.some(n => n.toLowerCase() === playAs.toLowerCase())) names.push(playAs);
+    const want = [''].concat(names);
+    const have = Array.from(select.options).map(o => o.value);
+    if (have.join('|') === want.join('|')) return;
+    select.innerHTML = '';
+    want.forEach(n => {
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = n || 'Nobody';
+      if (n.toLowerCase() === (playAs || '').toLowerCase()) o.selected = true;
+      select.appendChild(o);
     });
   }
 
@@ -172,7 +183,15 @@
       };
       if (pendingReq && pendingReq.request_id) body.request_id = pendingReq.request_id;
       fetch('/player-input/dice', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
-        .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+        .then(r => {
+          if (r.status === 409) {   // another device already answered this roll
+            pendingReq = null;
+            result.textContent = 'Already rolled on another screen';
+            setTimeout(closeDialog, 2600);
+            return Promise.reject(null);
+          }
+          return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status));
+        })
         .then(res => {
           const dice = (res.both || res.rolls || []).join(', ');
           result.textContent = 'Total ' + res.total + '  [' + dice + ']' + (res.modifier ? ' ' + (res.modifier > 0 ? '+' : '') + res.modifier : '');
@@ -181,7 +200,7 @@
           roll.textContent = 'Sent to the DM ✓';
           setTimeout(closeDialog, 2600);
         })
-        .catch(err => { result.textContent = 'Could not roll (' + err.message + ')'; roll.disabled = false; });
+        .catch(err => { if (!err) return; result.textContent = 'Could not roll (' + err.message + ')'; roll.disabled = false; });
     });
 
     dialog.appendChild(label);
@@ -243,7 +262,7 @@
     dialog.appendChild(el('div', 'pa-who', 'Only the DM sees this — not the other players.'));
     const text = el('textarea', 'pa-label pa-secret-text');
     text.rows = 4;
-    text.maxLength = 500;
+    text.maxLength = 1500;
     text.placeholder = 'What does ' + playAs + ' do or say in secret?';
     dialog.appendChild(text);
     const send = el('button', 'pa-roll', 'Send to the DM');
@@ -299,6 +318,9 @@
       const want = Array.from(tabs.querySelectorAll('.char-tab'))
         .find(b => String(b.dataset.char || '').toLowerCase() === playAs.toLowerCase());
       if (want && !want.classList.contains('active')) want.click();
+      // A remote player sends only as their own character: hide the other name
+      // tabs, so an action can no longer land under someone else's name.
+      if (want) tabs.querySelectorAll('.char-tab').forEach(b => { b.style.display = b === want ? '' : 'none'; });
     };
     new MutationObserver(pick).observe(tabs, { childList: true });
     pick();
@@ -327,6 +349,7 @@
     window.DisplayModules.register('play-as', payload => {
       if (payload.stats && Array.isArray(payload.stats.players)) {
         party = payload.stats.players.map(p => p && p.name).filter(Boolean);
+        fillSelect();
       }
       if (payload.dice_request && targetsMe(payload.dice_request, playAs)) openDialog(payload.dice_request);
       if (payload.dice_request_cancelled && pendingReq && pendingReq.request_id === payload.dice_request_cancelled) {

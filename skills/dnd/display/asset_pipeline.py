@@ -305,6 +305,15 @@ class Pipeline:
             try:
                 result = self._request(prov, prompt, kind, size, on_paid)
             except Exception as e:   # provider bugs must not abort the whole batch
+                if "HTTP 402" in str(e):
+                    # Prepaid credit is empty: not this picture's fault. Keep it (and
+                    # the rest) on the wait-list without using up an attempt — before,
+                    # such entries ended as "failed" and were never painted.
+                    self.queue.update(key, status="pending", last_error=str(e)[:300])
+                    rest = [x["key"] for x in entries[i:]]
+                    summary["blocked"].extend(k for k in rest if k not in summary["blocked"])
+                    log(f"! {key}: Gemini-Guthaben leer (HTTP 402) — {len(rest)} Bild(er) bleiben auf der Warteliste.")
+                    break
                 retry = attempts < max_attempts
                 self.queue.update(key, status="pending" if retry else "failed",
                                   attempts=attempts, last_error=str(e)[:300])

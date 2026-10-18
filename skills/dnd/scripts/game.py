@@ -45,6 +45,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -420,6 +421,10 @@ def cmd_bogen(args) -> int:
         slots[grade] = (max(0, used), total)
     currency = _parse_coins(args.muenzen) if args.muenzen else None
     inspiration = None if args.inspiration is None else args.inspiration == "ja"
+    if args.rk is not None:                                  # armour class: own line, own event
+        if not re.search(r"\*\*AC:\*\*\s*\d+", old_text):
+            sys.exit("Nichts geändert: Die AC-Zeile fehlt im Bogen.")
+        old_text = re.sub(r"(\*\*AC:\*\*\s*)\d+", lambda m: m.group(1) + str(args.rk), old_text, count=1)
 
     try:
         new_text = sheet.change(old_text, hp=hp, hp_max=hp_max, temp=args.temp, currency=currency,
@@ -435,6 +440,8 @@ def cmd_bogen(args) -> int:
         events.append(("hp.set", {"who": name, "current": new["hp"], "max": new["hp_max"]}))
     if args.temp is not None:
         events.append(("hp.temp", {"who": name, "value": new["temp_hp"]}))
+    if args.rk is not None:
+        events.append(("ac.set", {"who": name, "value": args.rk}))
     if currency is not None:
         events.append(("currency.set", dict({"who": name}, **new["currency"])))
     for rname, (left, total) in resources.items():
@@ -556,6 +563,7 @@ def main(argv=None) -> int:
     b.add_argument("figur", help="Name, Vorname oder Dateiname des Charakters")
     b.add_argument("--tp", metavar="AKT[/MAX]", help="Trefferpunkte, z. B. 6 oder 6/14")
     b.add_argument("--temp", type=int, metavar="N", help="temporäre TP")
+    b.add_argument("--rk", type=int, metavar="N", help="Rüstungsklasse (z. B. nach neuer Rüstung)")
     b.add_argument("--muenzen", metavar="TEXT", help='Münzen gesamt, z. B. "32gp 8sp 0cp" oder "32 GM 8 SM"')
     b.add_argument("--ressource", action="append", metavar="NAME=FREI/MAX",
                    help='begrenzte Fähigkeit, z. B. "Rage=0/2" (mehrfach möglich)')

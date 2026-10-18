@@ -24,8 +24,8 @@ Security model (defence in depth):
   - Character allowlist: name must be in loaded party stats
   - Printable ASCII only: all control chars and escape sequences stripped
   - Shell metacharacter strip: $ ` \\ ; | & > < ( ) [ ] { } !
-  - Per-line cap: 500 chars of action text
-  - Total payload cap: 1500 chars
+  - Per-line cap: 1500 chars of action text
+  - Total payload cap: 5000 chars
   - Audit log: every injection written to input_log.json with timestamp
   - Nothing is echoed back to attacker on rejection — silent drop
 """
@@ -123,11 +123,11 @@ _PRINTABLE    = re.compile(
 )
 _SHELL_CHARS  = re.compile(r'[$`\\;|&><()\[\]{}!]')  # no shell metacharacters
 _CHAR_NAME_RE = re.compile(r"^\w[\w '\-]{0,48}\w$|^\w{1,2}$", re.UNICODE)
-_ACTION_LINE  = re.compile(r"^\[([^\]]{1,50})\]:\s*(.{1,500})$")
+_ACTION_LINE  = re.compile(r"^\[([^\]]{1,50})\]:\s*(.{1,1500})$")
 
 _MAX_LINES    = 8     # sanity cap — no party this large exists
-_MAX_LINE_LEN = 560   # [Name]: + 500 chars + slack
-_MAX_TOTAL    = 1500  # total payload cap
+_MAX_LINE_LEN = 1560  # [Name]: + 1500 chars + slack
+_MAX_TOTAL    = 5000  # total payload cap
 
 
 def _known_chars() -> set:
@@ -176,7 +176,7 @@ def _sanitize(raw: str) -> str | None:
             return None
 
         action = _SHELL_CHARS.sub("", action)
-        action = _PRINTABLE.sub("", action)[:500].strip()
+        action = _PRINTABLE.sub("", action)[:1500].strip()
 
         if not action:
             return None

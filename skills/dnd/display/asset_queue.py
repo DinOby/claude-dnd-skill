@@ -116,14 +116,26 @@ class PendingQueue:
         """
         items = [i for i in items if i.get("key")]
         with self._thread_lock:
-            if self._known is not None and all(i["key"] in self._known for i in items):
+            # Fast path only when nothing could change: an entry queued first by
+            # `assets.py prompt --add` has no category yet, and the map that adds
+            # the token right after brings it ("object") — without it an object
+            # was painted as a portrait.
+            if self._known is not None and all(i["key"] in self._known and not i.get("category")
+                                               for i in items):
                 return []
             with self._locked():
                 data = self._read()
                 known = {e["key"] for e in data["queue"]}
+                by_key = {e["key"]: e for e in data["queue"]}
                 added = []
+                filled = False
                 for item in items:
                     if item["key"] in known:
+                        old = by_key.get(item["key"])
+                        if old is not None and not old.get("category") and item.get("category")                                 and old.get("status") == "pending":
+                            old["category"] = item["category"]
+                            old["updated"] = _now()
+                            filled = True
                         continue
                     known.add(item["key"])
                     added.append(item["key"])
@@ -134,7 +146,7 @@ class PendingQueue:
                         "attempts": 0, "last_error": None,
                         "first_seen": _now(), "updated": _now(),
                     })
-                if added:
+                if added or filled:
                     self._write(data)
                 self._known = known
                 return added

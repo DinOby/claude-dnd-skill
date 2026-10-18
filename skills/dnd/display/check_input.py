@@ -39,6 +39,10 @@ ROLL_PREFS = rt("roll_prefs.json")         # per-character roll overrides (Setti
 STATS_FILE = rt("stats.json")              # the party, as the DM pushed it
 
 
+_SAFE_NAME = re.compile(r"^[\w '\-]{1,48}$", re.UNICODE)
+_SAFE_ADDR = re.compile(r"^[0-9a-fA-F:.]{0,45}$")
+
+
 def _narration_directive():
     """A bracketed length directive the DM honors this turn, or '' if unset."""
     try:
@@ -118,6 +122,44 @@ def _collect_staged():
         return []
     return data if isinstance(data, list) else []
 
+
+def _play_as_conflicts() -> "dict":
+    """Characters played from more than one device (host-only display route)."""
+    import json
+    import ssl
+    import urllib.request
+    display_dir = os.path.dirname(os.path.abspath(__file__))
+    scheme_file = os.path.join(display_dir, ".scheme")
+    try:
+        scheme = open(scheme_file, encoding="utf-8").read().strip() if os.path.exists(scheme_file) else "http"
+        token = open(rt(".token"), encoding="utf-8").read().strip()
+    except OSError:
+        return {}
+    ctx = None
+    if scheme == "https":
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(f"{scheme}://localhost:5001/play-as/conflicts",
+                                 headers={"X-DND-Token": token})
+    try:
+        with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+try:
+    # Outside the player frame on purpose: this comes from the server, not from
+    # player text. Two devices on one character share its secrets and rolls.
+    for ch, addrs in sorted(_play_as_conflicts().items()):
+        if _SAFE_NAME.match(str(ch)) and all(_SAFE_ADDR.match(str(a)) for a in addrs):
+            print(f"[[WARNUNG für den DM: {len(addrs)} Geräte spielen als {ch} "
+                  f"({', '.join(addrs)}). Eins davon hat das falsche Playing as — "
+                  f"es sieht dessen Geheimnachrichten. Nicht an Spieler weitergeben.]]")
+except Exception:
+    pass
 
 try:
     content = ""

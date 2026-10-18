@@ -131,8 +131,11 @@ def cmd_prompt(p: Pipeline, args) -> int:
         found = p.store.find(key)
         known = found["entry"] if found else {}
         kind, _, slug = key.partition(":")
+        category = getattr(args, "category", None) or known.get("category")
         p.queue.add_many([{"key": key, "kind": kind, "name": known.get("name") or slug.replace("-", " "),
-                           "category": known.get("category")}])
+                           "category": category}])
+        if category:
+            fields["category"] = category
         fields.update(status="pending", attempts=0, last_error=None)
     if not p.queue.update(key, **fields):
         print(f"not on the wait-list: {key} (use --add to put it there)", file=sys.stderr)
@@ -224,6 +227,9 @@ def main(argv=None) -> int:
     pr.add_argument("key")
     pr.add_argument("text")
     pr.add_argument("--add", action="store_true", help="put KEY on the wait-list (again) if needed")
+    pr.add_argument("--category", choices=["pc", "npc", "enemy", "object", "weapon", "armor", "potion",
+                                           "scroll", "ring", "wand", "wondrous", "tool", "gear", "map"],
+                    help="picture style, e.g. object for a forge or a well (never a portrait)")
     gen = sub.add_parser("generate", help="generate images for pending entries")
     gen.add_argument("--limit", type=int)
     gen.add_argument("--provider")

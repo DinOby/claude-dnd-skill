@@ -3741,7 +3741,7 @@
     <div id="char-tabs" data-tab-section="move">
       <button class="char-tab active" data-char="Everybody">Everybody</button>
     </div>
-    <textarea id="player-input-text" rows="2" placeholder="Enter action or dialogue…" maxlength="500"
+    <textarea id="player-input-text" rows="2" placeholder="Enter action or dialogue…" maxlength="1500"
               data-tab-section="move"></textarea>
     <div id="input-footer" data-tab-section="move">
       <button id="skip-turn-btn" style="display:none" title="Skip this character's turn">Skip Turn</button>
@@ -6907,6 +6907,15 @@ _inputPanelHdr.addEventListener('click', () => {
   _inputArrow.textContent = _inputPanel.classList.contains('collapsed') ? '▲' : '▼';
 });
 
+// The text box names the character the action is sent for, so a wrong tab is
+// visible before sending (actions were landing under the wrong name).
+function _updateInputPlaceholder() {
+  if (!_inputText) return;
+  _inputText.placeholder = _selectedChar === 'Everybody'
+    ? 'Aktion für alle …'
+    : `Aktion für ${_selectedChar} …`;
+}
+
 // ── Build character tabs from stats players array ─────────────────
 function _buildCharTabs(players) {
   const names = ['Everybody', ...(players || []).map(p => p.name).filter(Boolean)];
@@ -6922,6 +6931,7 @@ function _buildCharTabs(players) {
       _charTabs.querySelectorAll('.char-tab').forEach(b =>
         b.classList.toggle('active', b.dataset.char === name)
       );
+      _updateInputPlaceholder();
       _skipTurnBtn.style.display = name === 'Everybody' ? 'none' : '';
     });
     _charTabs.appendChild(btn);
@@ -7146,6 +7156,14 @@ async function _stageAction() {
         _stageBtn.textContent = 'Awaiting approval…';
         return;  // leave text in box; auto-retry once approved via _onDeviceApproved
       }
+      if (res.status === 409) {
+        // Another device already sent an action for this name — almost always
+        // the wrong name tab. Keep the text and say so instead of overwriting.
+        _stageBtn.disabled = false;
+        _stageBtn.textContent = `${_selectedChar} hat schon eine Aktion — richtigen Namen gewählt?`;
+        _setPhoneStatus('compose');
+        return;
+      }
       if (res.ok) {
         localStorage.removeItem('dnd_staged_input');
         localStorage.removeItem('dnd_awaiting_approval');
@@ -7251,6 +7269,7 @@ function _reserveInputSpace() {
 
 // Initialise with no extra chars (populated when stats arrive)
 _buildCharTabs([]);
+_updateInputPlaceholder();
 
 // Restore cached staged input text on page load (survives reload before submission received)
 (function _restoreStagedCache() {

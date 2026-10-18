@@ -179,6 +179,8 @@ def _apply_figure(fig: dict, t: str, d: dict) -> None:
         fig["inspiration"] = d["value"]
     elif t == "feature.set":
         fig["resources"][d["name"]] = d["value"]
+    elif t == "ac.set":
+        fig["ac"] = d["value"]
     elif t == "currency.set":
         coins = dict(fig.get("currency") or {"pp": 0, "gp": 0, "ep": 0, "sp": 0, "cp": 0})
         for coin in ("pp", "gp", "ep", "sp", "cp"):
