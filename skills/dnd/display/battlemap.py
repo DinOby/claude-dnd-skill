@@ -455,6 +455,21 @@ def recheck(m: dict, root: Optional[str] = None) -> dict:
     return meta
 
 
+def accept(m: dict, root: Optional[str] = None) -> dict:
+    """The host takes the stored, turned-down picture although the check said no
+    (noted in the meta). The logic map still decides where figures may stand."""
+    img_path, meta_path = _paths(m["id"], root)
+    rejected = img_path.replace(".jpg", ".rejected.jpg")
+    meta = read_meta(m["id"], root)
+    if not meta or not os.path.isfile(rejected):
+        raise ValueError(f"no turned-down picture for '{m['id']}'")
+    os.replace(rejected, img_path)
+    meta.update(ok=True, accepted_by_host=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                check_said=meta.pop("reason", ""))
+    _write(meta_path, json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
+    return meta
+
+
 def _write(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
@@ -619,6 +634,7 @@ def main(argv=None) -> int:
     p.add_argument("--model", help="one-off image model for this painting (default: painted_map.model)")
     st = sub.add_parser("status"); st.add_argument("map_id", nargs="?")
     rc = sub.add_parser("recheck", help="check the turned-down picture again (free)"); rc.add_argument("map_id")
+    ac = sub.add_parser("accept", help="host: show the turned-down picture anyway"); ac.add_argument("map_id")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -634,6 +650,10 @@ def main(argv=None) -> int:
         meta = paint(_load(args.map_id), force=args.force, max_eur=args.max_eur, model=args.model)
         print(json.dumps(meta, ensure_ascii=False, indent=1))
         return 0 if meta.get("ok") else 1
+    if args.cmd == "accept":
+        accept(_load(args.map_id))
+        print(f"{args.map_id}: accepted by the host - shown painted (the logic map still decides)")
+        return 0
     if args.cmd == "recheck":
         meta = recheck(_load(args.map_id))
         print(f"{args.map_id}: {'fits now - shown painted' if meta.get('ok') else 'still does not fit: ' + meta.get('reason', '')}")
