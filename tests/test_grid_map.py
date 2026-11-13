@@ -184,7 +184,8 @@ class StoreTests(unittest.TestCase):
 
     def test_shown_maps_become_tabs_most_recent_first(self):
         for i in range(5):
-            self.store.set_map(tavern(id=f"ort-{i}", name=f"Ort {i}"))
+            # no shared pc: the one-place-per-pc rule (Sitzung 5) would close left places
+            self.store.set_map(tavern(id=f"ort-{i}", name=f"Ort {i}", tokens=[]))
         self.store.show("ort-1")
         self.assertEqual([tb["id"] for tb in self.store.tabs()], ["ort-1", "ort-4", "ort-3", "ort-2"])  # max 4
         self.assertEqual(self.store.tabs()[0]["name"], "Ort 1")

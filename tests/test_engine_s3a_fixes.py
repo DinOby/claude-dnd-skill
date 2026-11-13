@@ -204,7 +204,10 @@ class DisplayRefreshTests(_GameBase):
         shown = {p["name"]: p for p in self.pushes[-1]["players"]}
         self.assertEqual(shown["Ilsa Morgentau"]["hp"], {"current": 9, "max": 9, "temp": 0})
         self.assertEqual(shown["Ilsa Morgentau"]["conditions"], ["poisoned"])
-        self.assertEqual(shown["Brakka Steinfaust"]["sheet"], {"currency": "25 GM 3 SM 0 KM"})
+        # since Sitzung 5 the refresh also carries the sheet-led inventory and features
+        self.assertEqual(shown["Brakka Steinfaust"]["sheet"]["currency"], "25 GM 3 SM 0 KM")
+        self.assertEqual(shown["Brakka Steinfaust"]["sheet"]["inventory"],
+                         ["Streitaxt", "2 Wurfspeere", "Seil (50 ft)"])
 
     def test_anzeige_from_the_sheets_includes_tracker_conditions(self):
         rc, out = self.game("anzeige", "-c", "test", "--quelle", "bogen")
