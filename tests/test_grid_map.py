@@ -61,7 +61,10 @@ class NormalizeTests(unittest.TestCase):
         m = gm.normalize_map(tavern())
         self.assertEqual([t["id"] for t in m["tokens"]], ["flerb", "goblin", "goblin-2"])
         self.assertEqual((m["tokens"][0]["x"], m["tokens"][0]["y"], m["tokens"][0]["size"]), (2, 5, 1))
-        self.assertEqual(m["terrain"][1], {"x": 0, "y": 0, "w": 14, "h": 1, "type": "wall"})
+        # format 2 (Phase 1): the wall goes to the walls layer, the table to objects
+        self.assertEqual(m["layers"]["walls"], [{"x": 0, "y": 0, "w": 14, "h": 1, "type": "wall"}])
+        self.assertEqual(m["layers"]["objects"][0]["type"], "table")
+        self.assertIn({"x": 0, "y": 0, "w": 14, "h": 1, "type": "wall"}, m["terrain"])   # derived v1 view
         self.assertEqual((m["cell_ft"], m["rev"], m["background"]), (5, 0, {"asset": "map:taverne"}))
 
     def test_collects_every_problem(self):
@@ -100,7 +103,10 @@ class PatchTests(unittest.TestCase):
         self.assertEqual(self.m["rev"], 0)                                   # input untouched
         self.assertEqual(new["rev"], 1)
         self.assertEqual(applied["base"], 0)
-        self.assertEqual(applied["move"], [{"id": "flerb", "x": 3, "y": 4}, {"id": "goblin-2", "x": 10, "y": 6}])
+        self.assertEqual([{k: v for k, v in mv.items() if k != "path"} for mv in applied["move"]],
+                         [{"id": "flerb", "x": 3, "y": 4}, {"id": "goblin-2", "x": 10, "y": 6}])
+        self.assertEqual(applied["move"][0]["path"][0], [2, 5])          # walks from C6
+        self.assertEqual(applied["move"][0]["path"][-1], [3, 4])
         self.assertEqual(applied["remove"], ["goblin"])
         # the freed id is reused by the new goblin
         self.assertEqual([t["id"] for t in new["tokens"]], ["flerb", "goblin-2", "goblin"])
@@ -118,9 +124,15 @@ class PatchTests(unittest.TestCase):
         self.assertEqual(self.m["tokens"][0]["x"], 2)
 
     def test_warnings_and_wrong_map(self):
-        _, _, warnings = gm.apply_patch(self.m, {"move": [{"id": "flerb", "to": "B1"},
-                                                          {"id": "goblin-2", "to": "J6"}]})
-        self.assertEqual(warnings, ["Flerb stands on wall at B1", "Goblin shares J6 with Goblin"])
+        # Phase 1: a wall is no longer a warning but refused, with the nearest free square
+        with self.assertRaises(gm.MapError) as err:
+            gm.apply_patch(self.m, {"move": [{"id": "flerb", "to": "B1"}]})
+        self.assertIn("B1 is a wall", err.exception.problems[0])
+        self.assertIn("Nearest free square: B2", err.exception.problems[0])
+        with self.assertRaises(gm.MapError):          # force never puts a figure into a wall
+            gm.apply_patch(self.m, {"move": [{"id": "flerb", "to": "B1", "force": True}]})
+        _, _, warnings = gm.apply_patch(self.m, {"move": [{"id": "goblin-2", "to": "J6"}]})
+        self.assertEqual(warnings, ["Goblin shares J6 with Goblin"])
         with self.assertRaises(gm.MapError):
             gm.apply_patch(self.m, {"map_id": "elsewhere", "move": [{"id": "flerb", "to": "B2"}]})
         with self.assertRaises(gm.MapError):
@@ -145,7 +157,8 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(m["rev"], 1)
         layout = json.loads((self.lib / "kessel-schankraum.json").read_text(encoding="utf-8"))
         self.assertNotIn("tokens", layout)
-        self.assertEqual(layout["terrain"][0]["type"], "table")
+        self.assertEqual((layout["format"], layout["layers"]["objects"][0]["type"]), (2, "table"))
+        self.assertNotIn("terrain", layout)            # derived on load, never stored twice
         placement = json.loads((self.camp_a / "kessel-schankraum.json").read_text(encoding="utf-8"))
         self.assertEqual([t["id"] for t in placement["tokens"]], ["flerb", "goblin", "goblin-2"])
         self.assertEqual(json.loads((self.camp_a / "active.json").read_text(encoding="utf-8")),
@@ -160,7 +173,7 @@ class StoreTests(unittest.TestCase):
         again.set_placement_dir(str(self.camp_b))
         self.assertIsNone(again.current())
         shown = again.show("kessel-schankraum")
-        self.assertEqual((shown["tokens"], shown["terrain"][0]["type"]), ([], "table"))
+        self.assertEqual((shown["tokens"], shown["layers"]["objects"][0]["type"]), ([], "table"))
         self.assertEqual(again.library(), ["kessel-schankraum"])
         again.set_placement_dir(str(self.camp_a))
         self.assertEqual(again.current()["tokens"][0]["x"], 3)
@@ -291,7 +304,8 @@ class PlacementTests(unittest.TestCase):
         new, applied, warnings = gm.apply_patch(m, {"add": [{"name": "Mutter Gerlinde", "kind": "npc", "at": "F3"}]})
         self.assertEqual(len(new["tokens"]), 1)
         self.assertEqual(gm.format_coord(new["tokens"][0]["x"], new["tokens"][0]["y"]), "F3")
-        self.assertEqual(applied["move"], [{"id": "mutter-gerlinde", "x": 5, "y": 2}])
+        self.assertEqual({k: v for k, v in applied["move"][0].items() if k != "path"},
+                         {"id": "mutter-gerlinde", "x": 5, "y": 2})
         self.assertIn("Mutter Gerlinde was already on the map — moved instead of added", warnings)
 
     def test_re_adding_a_named_token_without_a_square_changes_nothing(self):
@@ -353,7 +367,7 @@ class TemplateStoreTests(unittest.TestCase):
         self.assertEqual((m["id"], m["cols"], m["background"]), ("koenigsstrasse-west", 18, {"asset": "map:waldweg"}))
         # the DM edits the stored layout; a later --map-new with the same id keeps that edit and the tokens
         layout = json.loads((self.lib / "koenigsstrasse-west.json").read_text(encoding="utf-8"))
-        layout["terrain"].append({"x": 8, "y": 0, "w": 1, "h": 1, "type": "shrine"})
+        layout["layers"]["objects"].append({"x": 8, "y": 0, "w": 1, "h": 1, "type": "shrine"})
         (self.lib / "koenigsstrasse-west.json").write_text(json.dumps(layout), encoding="utf-8")
         again = self.store.set_map({"template": "forest-road", "id": "koenigsstrasse-west"})
         self.assertEqual(again["terrain"][-1]["type"], "shrine")
@@ -400,9 +414,12 @@ class RouteTests(IsolatedApp):
         self.assertEqual((code, data["map_id"], data["rev"]), (200, "kessel-schankraum", 1))
         self.assertEqual(self.drain("map")[0]["id"], "kessel-schankraum")
         code, data = self.post({"patch": {"move": [{"id": "Flerb", "to": "B1"}]}})
+        self.assertEqual(code, 400)                                     # a wall: refused (Phase 1)
+        self.assertIn("Nearest free square", data["errors"][0])
+        code, data = self.post({"patch": {"move": [{"id": "Flerb", "to": "B2"}]}})
         self.assertEqual((code, data["rev"]), (200, 2))
-        self.assertEqual(data["warnings"], ["Flerb stands on wall at B1"])
-        self.assertEqual(self.drain("map_patch")[0]["move"], [{"id": "flerb", "x": 1, "y": 0}])
+        mv = self.drain("map_patch")[0]["move"][0]
+        self.assertEqual((mv["id"], mv["x"], mv["y"], mv["path"][-1]), ("flerb", 1, 1, [1, 1]))
         self.assertEqual(self.post({"hide": True})[0], 200)
         self.assertEqual(self.drain("map"), [None])
         self.assertTrue(self.phone.empty())

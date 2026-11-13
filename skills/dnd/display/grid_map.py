@@ -47,6 +47,11 @@ import threading
 import unicodedata
 from typing import Optional
 
+try:
+    import map_v2
+except ImportError:                                  # imported as a package module in some tests
+    from . import map_v2                             # type: ignore
+
 MAX_CELLS = 60                       # per side; a TV cannot show more legibly
 TOKEN_KINDS = ("pc", "npc", "enemy", "object")
 MAX_TOKEN_SIZE = 4                   # gargantuan
@@ -54,8 +59,10 @@ BLOCKING_TERRAIN = ("wall",)         # ending a move here is only a warning
 # Auto-placement avoids every terrain cell except these (you can stand there).
 WALKABLE_TERRAIN = ("difficult", "door", "stairs", "road", "rug", "bridge", "shallow-water")
 SPAWN_KINDS = ("pc", "npc", "enemy")  # object tokens use the npc zone
-LAYOUT_FIELDS = ("id", "name", "template", "tags", "cols", "rows", "cell_ft",
-                 "background", "terrain", "spawn")
+LAYOUT_FIELDS = ("format", "id", "name", "template", "tags", "cols", "rows", "cell_ft",
+                 "background", "floor", "layers", "spawn")
+# Base ground when a map names none: guessed from its tags/template.
+FLOOR_TYPES = map_v2.GROUND_TYPES
 _TOKEN_FIELDS = ("id", "name", "kind", "x", "y", "size", "asset", "archetype", "hidden")
 
 _COORD = re.compile(r"^\s*([A-Za-z]{1,2})\s*(\d{1,3})\s*$")
@@ -316,8 +323,72 @@ def _norm_spawn(raw, cols: int, rows: int, problems: "list[str]") -> "dict[str, 
     return out
 
 
-def normalize_map(raw: dict) -> dict:
-    """Validated, canonical copy of a full map. Raises MapError."""
+def _floor(raw: dict, out: dict) -> str:
+    floor = raw.get("floor")
+    if isinstance(floor, str) and floor.strip().lower() in FLOOR_TYPES:
+        return floor.strip().lower()
+    hints = " ".join(out.get("tags", []) + [out.get("template", ""), out["id"]]).lower()
+    for words, kind in ((("forest", "wald", "clearing", "camp", "road", "pass", "field", "wiese", "see"), "grass"),
+                        (("tavern", "inn", "schank", "krug", "taverne"), "wood"),
+                        (("cave", "grotte", "mine", "stollen", "hoehle"), "earth"),
+                        (("market", "markt", "street", "square", "platz", "hof"), "cobble")):
+        if any(w in hints for w in words):
+            return kind
+    return "stone"
+
+
+def _norm_layers(raw: dict, cols: int, rows: int, problems: "list[str]") -> dict:
+    """v2 layers from `layers` (format 2) or converted from a v1 `terrain` list."""
+    given = raw.get("layers")
+    if given is None:
+        return map_v2.from_v1(_norm_terrain(raw.get("terrain"), cols, rows, problems))
+    if not isinstance(given, dict):
+        problems.append("layers should be an object with ground, terrain, walls, objects, paths")
+        return map_v2.from_v1([])
+    layers = {}
+    for name in map_v2.LAYERS:
+        rects = _norm_terrain(given.get(name), cols, rows, problems)
+        for r in rects:
+            r.pop("from_path", None)
+        layers[name] = rects
+    for name in given:
+        if name not in map_v2.LAYERS + ("paths",):
+            problems.append(f"layers.{name}: unknown layer (use {', '.join(map_v2.LAYERS)}, paths)")
+    layers["paths"] = map_v2.norm_paths(given.get("paths"), cols, rows, problems, parse_coord)
+    return layers
+
+
+def placement_problem(m: dict, tok: dict, x: int, y: int, blocked: "Optional[dict]" = None,
+                      force: bool = False) -> "Optional[str]":
+    """Why `tok` cannot stand at (x, y), or None. Walls, water, cliffs and
+    chasms are never allowed; objects (table, cart, crate) only with force."""
+    if tok.get("kind") == "object":
+        return None                    # an object marker (a well, a cage) may sit on its object
+    blocked = map_v2.blockers(m) if blocked is None else blocked
+    hits = [(c, blocked[c]) for c in sorted(_cells(x, y, tok["size"])) if c in blocked]
+    if not hits:
+        return None
+    if force and all(layer == "objects" for _, (layer, _kind) in hits):
+        return None
+    (cx, cy), (layer, kind) = hits[0]
+    occupied = {c for t in m["tokens"] if t is not tok and t.get("x") is not None
+                for c in _cells(t["x"], t["y"], t["size"])}
+    free = map_v2.nearest_free(m, x, y, tok["size"], occupied, blocked)
+    hint = f" Nearest free square: {format_coord(*free)}." if free else ""
+    what = {"walls": "a wall", "terrain": "water or a drop", "objects": "an object"}[layer]
+    extra = (" Put the figure next to it; only for a deliberate stunt (standing on a table) "
+             "add \"force\": true." if layer == "objects" else "")
+    return (f"{format_coord(cx, cy)} is {what} ({kind} / {map_v2.german(kind)}) — "
+            f"a figure cannot stand there.{hint}{extra}")
+
+
+def normalize_map(raw: dict, strict: bool = False) -> dict:
+    """Validated, canonical copy of a full map. Raises MapError.
+
+    v1 maps (a flat `terrain` list) come back as format 2 with layers; the flat
+    list stays available as the derived `terrain`. With `strict` (a map the DM
+    sends), a figure placed on a wall, in water or on an object is rejected
+    with the nearest free square; stored maps load leniently."""
     problems: "list[str]" = []
     if not isinstance(raw, dict):
         raise MapError(["a map should be a JSON object"])
@@ -345,7 +416,10 @@ def normalize_map(raw: dict) -> dict:
         problems.append("background should be {\"asset\": \"map:…\"}")
         bg = None
     out["background"] = {"asset": bg["asset"]} if bg else None
-    out["terrain"] = _norm_terrain(raw.get("terrain"), cols, rows, problems)
+    out["format"] = map_v2.FORMAT
+    out["floor"] = _floor(raw, out)
+    out["layers"] = _norm_layers(raw, cols, rows, problems)
+    out["terrain"] = map_v2.flat_terrain(out["layers"], cols, rows)   # v1 view, derived
     out["spawn"] = _norm_spawn(raw.get("spawn"), cols, rows, problems)
     taken: "set[str]" = set()
     tokens_raw = raw.get("tokens", [])
@@ -357,6 +431,15 @@ def normalize_map(raw: dict) -> dict:
         tok = _norm_token(raw_tok, cols, rows, taken, f"tokens[{i}]", problems, allow_unplaced=True)
         if tok:
             out["tokens"].append(tok)
+    if not problems and strict:
+        blocked = map_v2.blockers(out)
+        for i, tok in enumerate(out["tokens"]):
+            if tok["x"] is not None:
+                msg = placement_problem(out, tok, tok["x"], tok["y"], blocked,
+                                        force=bool((tokens_raw[i] or {}).get("force"))
+                                        if isinstance(tokens_raw[i], dict) else False)
+                if msg:
+                    problems.append(f"tokens[{i}] ({tok['name']}): {msg}")
     if not problems:
         place_tokens(out, [t for t in out["tokens"] if t["x"] is None], problems)
     out["rev"] = raw["rev"] if _is_int(raw.get("rev")) and raw["rev"] >= 0 else 0
@@ -384,7 +467,7 @@ def find_token(m: dict, ref: str) -> Optional[dict]:
 
 
 def _blocked_cells(m: dict) -> "set[tuple[int, int]]":
-    return {c for t in m["terrain"] if t["type"] not in WALKABLE_TERRAIN for c in _cells_rect(t)}
+    return set(map_v2.blockers(m))
 
 
 def _occupied_cells(m: dict, skip=()) -> "set[tuple[int, int]]":
@@ -465,6 +548,27 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
     new = copy.deepcopy(m)
     applied = {"map_id": m["id"], "base": m["rev"], "move": [], "add": [], "remove": [], "update": []}
     touched: "list[dict]" = []
+    blocked = map_v2.blockers(new)
+
+    def _moved(tok, pos, op, where):
+        """Check the square, record the move with its walking path; False on a problem."""
+        msg = placement_problem(new, tok, pos[0], pos[1], blocked,
+                                force=bool(op.get("force")) if isinstance(op, dict) else False)
+        if msg:
+            problems.append(f"{where}: {msg}")
+            return False
+        entry = {"id": tok["id"], "x": pos[0], "y": pos[1]}
+        if tok["x"] is not None and tok["size"] == 1 and (tok["x"], tok["y"]) != tuple(pos):
+            way = map_v2.find_path(new, (tok["x"], tok["y"]), tuple(pos), blocked)
+            if way and len(way) <= 80:
+                entry["path"] = [list(c) for c in way]
+            else:
+                entry["jump"] = True          # no way on foot (climbed, flew, teleported)
+        tok["x"], tok["y"] = pos
+        applied["move"] = [a for a in applied["move"] if a["id"] != tok["id"]]
+        applied["move"].append(entry)
+        touched.append(tok)
+        return True
 
     for i, ref in enumerate(_as_list(patch.get("remove"), "remove", problems)):
         tok = find_token(new, ref if isinstance(ref, str) else (ref or {}).get("id", ""))
@@ -488,10 +592,7 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
                     new["cols"], new["rows"], f"move[{i}] ({tok['name']})", problems)
         if len(problems) > before:
             continue
-        tok["x"], tok["y"] = pos
-        applied["move"] = [a for a in applied["move"] if a["id"] != tok["id"]]
-        applied["move"].append({"id": tok["id"], "x": pos[0], "y": pos[1]})
-        touched.append(tok)
+        _moved(tok, pos, mv, f"move[{i}] ({tok['name']})")
 
     for i, up in enumerate(_as_list(patch.get("update"), "update", problems)):
         ref = (up.get("id") or up.get("name")) if isinstance(up, dict) else None
@@ -528,16 +629,18 @@ def apply_patch(m: dict, patch: dict) -> "tuple[dict, dict, list[str]]":
             if existing is not None:
                 if any(k in spec for k in ("at", "to", "x", "y")):
                     pos = _position(spec, f"add[{i}] ({existing['name']})", problems)
-                    if pos is not None:
-                        existing["x"], existing["y"] = pos
-                        applied["move"] = [a for a in applied["move"] if a["id"] != existing["id"]]
-                        applied["move"].append({"id": existing["id"], "x": pos[0], "y": pos[1]})
-                        touched.append(existing)
+                    if pos is not None and _moved(existing, pos, spec, f"add[{i}] ({existing['name']})"):
                         redirected.append(f"{existing['name']} was already on the map — moved instead of added")
                 else:
                     redirected.append(f"{existing['name']} is already on the map — not added again")
                 continue
         tok = _norm_token(raw, new["cols"], new["rows"], taken, f"add[{i}]", problems, allow_unplaced=True)
+        if tok and tok["x"] is not None:
+            msg = placement_problem(new, tok, tok["x"], tok["y"], blocked,
+                                    force=bool(spec.get("force")) if isinstance(spec, dict) else False)
+            if msg:
+                problems.append(f"add[{i}] ({tok['name']}): {msg}")
+                continue
         if tok:
             new["tokens"].append(tok)
             applied["add"].append(tok)
@@ -781,7 +884,7 @@ class MapStore:
                                       if k in ("tokens", "name") and v is not None}, id=map_id)
             else:
                 raw = expand_template(raw, self.templates)
-        m = normalize_map(raw)
+        m = normalize_map(raw, strict=True)
         if isinstance(raw, dict) and "tokens" not in raw:
             saved = (_read_json(self._placement_path(m["id"])) or {}).get("tokens") or []
             for tok in saved if isinstance(saved, list) else []:

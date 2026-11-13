@@ -18,6 +18,12 @@ Usage:
     python3 maps.py reset ID [ID ...] [--keep-image] [--dry-run]
     python3 maps.py reset --tag tavern | --all [--keep-image] [--dry-run]
     python3 maps.py restore ID [--version TIMESTAMP]
+    python3 maps.py convert --out DIR [ID ...]     # map format v2 copies (Phase 1)
+
+convert never touches the library: it writes each layout as format 2 (layers
+ground / terrain / walls / objects / paths) into DIR and reports what went
+where. The display reads v1 layouts as v2 on the fly anyway; convert is for
+checking the result or for replacing the library deliberately afterwards.
 """
 
 import argparse
@@ -242,6 +248,43 @@ def cmd_restore(lib, args):
     return 0
 
 
+def cmd_convert(lib, args):
+    from grid_map import LAYOUT_FIELDS, MapError, normalize_map   # noqa: E402
+    import map_v2                                                 # noqa: E402
+    out_dir = os.path.abspath(args.out)
+    if os.path.abspath(lib.library_dir) == out_dir:
+        print("convert: --out must not be the library itself (nothing is overwritten)", file=sys.stderr)
+        return 2
+    ids = [slug(i) for i in args.ids]
+    if not ids:
+        try:
+            ids = sorted(f[:-5] for f in os.listdir(lib.library_dir) if f.endswith(".json"))
+        except OSError:
+            print(f"convert: no map library at {lib.library_dir}", file=sys.stderr)
+            return 1
+    os.makedirs(out_dir, exist_ok=True)
+    failed = 0
+    for map_id in ids:
+        raw = lib._read(os.path.join(lib.library_dir, f"{map_id}.json"))
+        if raw is None:
+            print(f"  {map_id}: not readable — skipped")
+            failed += 1
+            continue
+        try:
+            m = normalize_map(dict(raw, tokens=[]))
+        except MapError as e:
+            print(f"  {map_id}: {'; '.join(e.problems)}")
+            failed += 1
+            continue
+        layout = {k: m[k] for k in LAYOUT_FIELDS if k in m}
+        with open(os.path.join(out_dir, f"{map_id}.json"), "w", encoding="utf-8") as f:
+            json.dump(layout, f, ensure_ascii=False, indent=1)
+        counts = ", ".join(f"{k} {len(m['layers'][k])}" for k in map_v2.LAYERS + ("paths",))
+        print(f"  {map_id}: floor {m['floor']} · {counts}")
+    print(f"{len(ids) - failed} of {len(ids)} layouts written to {out_dir} (library unchanged).")
+    return 1 if failed else 0
+
+
 def main(argv=None, lib=None):
     ap = argparse.ArgumentParser(prog="maps", description="Battle-map library: list, reset, restore.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -258,9 +301,13 @@ def main(argv=None, lib=None):
     rt_ = sub.add_parser("restore", help="bring an archived layout back")
     rt_.add_argument("id")
     rt_.add_argument("--version", help="archive timestamp (default: the latest)")
+    cv = sub.add_parser("convert", help="write format-2 copies of the layouts into --out (library unchanged)")
+    cv.add_argument("ids", nargs="*")
+    cv.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     lib = lib or Library()
-    return {"list": cmd_list, "reset": cmd_reset, "restore": cmd_restore}[args.cmd](lib, args)
+    return {"list": cmd_list, "reset": cmd_reset, "restore": cmd_restore,
+            "convert": cmd_convert}[args.cmd](lib, args)
 
 
 if __name__ == "__main__":
