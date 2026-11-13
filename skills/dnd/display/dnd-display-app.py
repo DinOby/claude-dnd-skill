@@ -2670,7 +2670,7 @@ def _painter_enabled() -> bool:
 _painter = _battlemap.Painter(_painted_done, _painter_enabled)
 
 
-def _painted(m: "Optional[dict]") -> dict:
+def _painted(m: "Optional[dict]", paint: bool = True) -> dict:
     """{"url", "status": ok|pending|failed|off, "reason"} for the map's painted picture."""
     if not m or m.get("temporary"):
         return {"url": None, "status": "off"}
@@ -2682,11 +2682,11 @@ def _painted(m: "Optional[dict]") -> dict:
         return {"url": url, "status": "ok"}
     if meta and not meta.get("ok"):
         return {"url": None, "status": "failed", "reason": meta.get("reason", "")}
-    queued = _painter.request(m)
+    queued = _painter.request(m) if paint else False   # only the DM's live map is painted
     return {"url": None, "status": "pending" if queued or _painter_enabled() else "off"}
 
 
-def _map_meta(m: "Optional[dict]") -> dict:
+def _map_meta(m: "Optional[dict]", paint: bool = True) -> dict:
     """What the browser needs to draw a map besides the map itself: the squares a
     figure cannot enter (for the reach overlay), the active style and the painted
     picture of the place (Phase 1)."""
@@ -2694,7 +2694,7 @@ def _map_meta(m: "Optional[dict]") -> dict:
         return {}
     import map_v2 as _mv2
     return {"blocked": sorted([x, y] for x, y in _mv2.blockers(m)), "style": _map_style(),
-            "painted": _painted(m)}
+            "painted": _painted(m, paint)}
 
 
 def _map_message(m: "Optional[dict]") -> dict:
@@ -2718,7 +2718,7 @@ def map_get():
         m = _maps.peek(want)
         if m is None:
             return jsonify({"errors": [f"no map '{want}'"]}), 404
-        return jsonify({"map": m, "images": _map_images(m), "meta": _map_meta(m), "preview": True,
+        return jsonify({"map": m, "images": _map_images(m), "meta": _map_meta(m, paint=False), "preview": True,
                         "tabs": _maps.tabs()})
     m = _maps.current()
     return jsonify({"map": m, "images": _map_images(m), "meta": _map_meta(m), "library": _maps.library(),

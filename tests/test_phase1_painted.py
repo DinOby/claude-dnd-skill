@@ -184,6 +184,16 @@ class ServerTests(unittest.TestCase):
         meta = mod._map_meta(tavern())
         self.assertEqual(meta["painted"]["status"], "off")
 
+    def test_looking_at_a_tab_never_starts_a_painting(self):
+        from unittest import mock
+        from tests.app_isolation import import_app
+        mod = import_app("dnd_display_app_paint2")
+        with mock.patch.object(mod._painter, "request") as req,              mock.patch.object(mod, "_painter_enabled", return_value=True):
+            mod._map_meta(tavern(), paint=False)
+            req.assert_not_called()
+            mod._map_meta(tavern())
+            req.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
