@@ -82,13 +82,17 @@ def _coin_text(coins: "dict | None") -> "str | None":
                     if coins.get(k) or k in ("gp", "sp", "cp"))
 
 
-def display_player(fig: dict) -> dict:
+def display_player(fig: dict, sheet_text: "str | None" = None) -> dict:
     """A push_stats player update with the engine-side values of one figure.
 
     `fig` is an engine figure (state.json) or sheet.parse() output — the same keys.
     Only values the figure knows are sent; the display merges them by name.
+    With `sheet_text` (the Markdown sheet) the features come along too, so the
+    display follows every sheet change without a full rebuild (Sitzung 5).
     """
     p: dict = {"name": fig["name"]}
+    if fig.get("ac") is not None:
+        p["ac"] = fig["ac"]
     if fig.get("level") is not None:
         p["level"] = fig["level"]
     if fig.get("hp") is not None:
@@ -106,9 +110,17 @@ def display_player(fig: dict) -> dict:
         p["conditions"] = list(fig.get("conditions") or [])
     if "concentration" in fig:
         p["concentration"] = fig.get("concentration")
+    sheet_part: dict = {}
     money = _coin_text(fig.get("currency"))
     if money:
-        p["sheet"] = {"currency": money}
+        sheet_part["currency"] = money
+    if isinstance(fig.get("inventory"), dict):
+        sheet_part["inventory"] = [i for items in fig["inventory"].values() for i in items
+                                   if not sheet.is_placeholder(i)]
+    if sheet_text is not None:
+        sheet_part["features"] = sheet.features(sheet_text)
+    if sheet_part:
+        p["sheet"] = sheet_part
     return p
 
 
@@ -370,7 +382,7 @@ def _finish(d: pathlib.Path, path: pathlib.Path, name: str, new_text: str, event
         fig = sheet.parse(new_text)
     fig = dict(fig, name=name)
     print(f"Bogen {path.name} geändert: " + ", ".join(t for t, _ in events) + ".")
-    _display_push({"players": [display_player(fig)]})
+    _display_push({"players": [display_player(fig, new_text)]})
     return 0
 
 
@@ -518,7 +530,13 @@ def cmd_anzeige(args) -> int:
     else:
         # sheets plus tracker.json (conditions, concentration) — the Markdown side
         figures = list(_markdown_characters(d)[0].values())
-    payload = {"players": [display_player(f) for f in figures]}
+    texts = {}
+    for name, path in lead.sheet_paths(d).items():
+        try:
+            texts[name] = path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    payload = {"players": [display_player(f, texts.get(f["name"])) for f in figures]}
     shown = _display_push(payload)
     names = ", ".join(p["name"] for p in payload["players"])
     print(f"Anzeige ({quelle}): {names}" + ("" if shown else " – Display nicht erreicht"))

@@ -2,6 +2,9 @@
 
 A1  An XP award keeps its reason in words (the --note text), next to kind and
     difficulty, in the ledger and the game-state log. New kind: quest.
+A2  The display follows sheet changes (armour class, inventory, features) without
+    a restart: game.py sends them, and a sheet watcher catches hand edits.
+A4  Placeholders such as "keine (Ungerüstete Verteidigung)" are no items.
 """
 from __future__ import annotations
 
@@ -103,6 +106,159 @@ class XpReasonTests(unittest.TestCase):
         self.assertEqual(protocol.check_event(event), [])
         event["data"]["kind"] = "erfunden"
         self.assertNotEqual(protocol.check_event(event), [])
+
+
+SHEET = """# Alrik Eisenfaust
+
+## Combat Stats
+- **AC:** 15
+- **HP:** 20 / 32
+
+## Features & Traits
+- **Rage (Kampfrausch)** — Bonusaktion, +2 Schaden. **Rages: 2/3**
+- **Pfad des Berserkers** — Stufe 3. *Raserei:* +2W6 beim ersten Treffer.
+- Fertigkeiten: Athletik
+
+## Equipment & Inventory
+**Weapons:**
+- Zweihandaxt
+- Speer
+
+**Armour:**
+- keine (Ungerüstete Verteidigung)
+
+**Currency:** 118gp 5sp 0cp
+"""
+
+
+class PlaceholderTests(unittest.TestCase):
+    def setUp(self):
+        from engine import sheet
+        self.sheet = sheet
+
+    def test_placeholder_lines_are_no_items(self):
+        for text in ("keine", "Keine.", "keine (Ungerüstete Verteidigung)", "—", "none", "nichts: leer"):
+            self.assertTrue(self.sheet.is_placeholder(text), text)
+        for text in ("Speer", "Kein Problem-Schwert", "Keinohrhase", "Schild (+2 RK)"):
+            self.assertFalse(self.sheet.is_placeholder(text), text)
+
+    def test_the_sheet_parser_skips_them(self):
+        inv = self.sheet.parse(SHEET)["inventory"]
+        self.assertEqual(inv["Armour"], [])
+        self.assertEqual(inv["Weapons"], ["Zweihandaxt", "Speer"])
+
+    def test_an_old_import_with_placeholders_replays_without_them(self):
+        from engine import state
+        events = [{"v": 1, "seq": 1, "t": "x", "by": "dm", "src": "game", "type": "import",
+                   "data": {"characters": {"Alrik": {"name": "Alrik", "inventory": {
+                       "Armour": ["keine (Ungerüstete Verteidigung)"], "Weapons": ["Speer"]}}}}},
+                  {"v": 1, "seq": 2, "t": "x", "by": "dm", "src": "bogen", "type": "inventory.add",
+                   "data": {"who": "Alrik", "item": "keine"}}]
+        fig = state.replay(events)["characters"]["Alrik"]
+        self.assertEqual(fig["inventory"], {"Armour": [], "Weapons": ["Speer"]})
+
+    def test_features_are_read_with_name_and_text(self):
+        feats = self.sheet.features(SHEET)
+        self.assertEqual([f["name"] for f in feats], ["Rage (Kampfrausch)", "Pfad des Berserkers"])
+        self.assertIn("Raserei:", feats[1]["text"])
+        self.assertNotIn("*", feats[1]["text"])
+
+
+class GameDisplayPushTests(unittest.TestCase):
+    def test_display_player_carries_ac_inventory_and_features(self):
+        spec = importlib.util.spec_from_file_location("game_s5", SCRIPTS / "game.py")
+        game = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(game)
+        from engine import sheet
+        fig = dict(sheet.parse(SHEET), name="Alrik Eisenfaust")
+        p = game.display_player(fig, SHEET)
+        self.assertEqual(p["ac"], 15)
+        self.assertEqual(p["sheet"]["inventory"], ["Zweihandaxt", "Speer"])
+        self.assertEqual(p["sheet"]["features"][0]["name"], "Rage (Kampfrausch)")
+        self.assertEqual(p["sheet"]["currency"], "118 GM 5 SM 0 KM")
+
+
+class SheetWatcherTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "skills" / "dnd" / "display"))
+        import sheet_watch
+        self.sw = sheet_watch
+        self._d = tempfile.TemporaryDirectory()
+        self.camp = pathlib.Path(self._d.name) / "c"
+        (self.camp / "characters").mkdir(parents=True)
+        self.path = self.camp / "characters" / "alrik.md"
+        self.path.write_text(SHEET, encoding="utf-8")
+        self.applied = []
+        self.accept = True
+        self.w = sheet_watch.SheetWatcher(lambda: self.camp, self._apply, interval=60)
+
+    def tearDown(self):
+        self._d.cleanup()
+
+    def _apply(self, update):
+        self.applied.append(update)
+        return self.accept
+
+    def test_first_scan_sends_the_sheet_values_but_never_hit_points(self):
+        self.assertEqual(self.w.scan(), ["Alrik Eisenfaust"])
+        u = self.applied[0]
+        self.assertEqual(u["ac"], 15)
+        self.assertEqual(u["sheet"]["inventory"], ["Zweihandaxt", "Speer"])
+        for engine_led in ("hp", "conditions", "spell_slots", "effects"):
+            self.assertNotIn(engine_led, u)
+
+    def test_an_unchanged_sheet_is_not_sent_again(self):
+        self.w.scan()
+        self.assertEqual(self.w.scan(), [])
+
+    def test_a_hand_edit_reaches_the_display(self):
+        self.w.scan()
+        import os
+        text = SHEET.replace("- **AC:** 15", "- **AC:** 12").replace("- Speer\n", "")
+        self.path.write_text(text, encoding="utf-8")
+        st = self.path.stat()
+        os.utime(self.path, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        self.assertEqual(self.w.scan(), ["Alrik Eisenfaust"])
+        self.assertEqual(self.applied[-1]["ac"], 12)
+        self.assertEqual(self.applied[-1]["sheet"]["inventory"], ["Zweihandaxt"])
+
+    def test_a_player_not_yet_on_the_display_is_retried(self):
+        self.accept = False
+        self.assertEqual(self.w.scan(), [])
+        self.accept = True
+        self.assertEqual(self.w.scan(), ["Alrik Eisenfaust"])
+
+
+class AppSheetMergeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from tests.app_isolation import import_app
+        cls.mod = import_app("dnd_display_app_s5")
+
+    def test_merge_updates_sheet_values_and_keeps_engine_values(self):
+        self.mod._current_stats = {"players": [{
+            "name": "Alrik Eisenfaust", "ac": 15, "hp": {"current": 9, "max": 32},
+            "sheet": {"attacks": [{"name": "Axt"}], "inventory": ["Speer", "Alt"]}}]}
+        with mock.patch.object(self.mod, "_broadcast") as bc,                 mock.patch.object(self.mod, "_persist_stats"):
+            ok = self.mod._apply_sheet_update({"name": "Alrik Eisenfaust", "ac": 12,
+                                               "sheet": {"inventory": ["Speer"], "features": []}})
+        self.assertTrue(ok)
+        p = self.mod._current_stats["players"][0]
+        self.assertEqual(p["ac"], 12)
+        self.assertEqual(p["hp"], {"current": 9, "max": 32})
+        self.assertEqual(p["sheet"]["attacks"], [{"name": "Axt"}])
+        self.assertEqual(p["sheet"]["inventory"], ["Speer"])
+        bc.assert_called_once()
+
+    def test_unknown_player_is_not_added(self):
+        self.mod._current_stats = {"players": [{"name": "Bela"}]}
+        with mock.patch.object(self.mod, "_broadcast") as bc:
+            self.assertFalse(self.mod._apply_sheet_update({"name": "Fremder", "ac": 10}))
+        self.assertEqual(len(self.mod._current_stats["players"]), 1)
+        bc.assert_not_called()
+
+    def test_the_watcher_is_not_started_on_import(self):
+        self.assertIsNone(self.mod._sheet_watcher._thread)
 
 
 if __name__ == "__main__":

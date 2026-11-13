@@ -3732,7 +3732,57 @@ def stream():
 _scene_ready = True
 _reconcile_scene(broadcast=False, full=False)
 
+
+# --- Sheets follow the Markdown files (Sitzung 5) ---------------------------
+# A sheet changed by game.py bogen or by hand reaches the display within a few
+# seconds: armour class, level, inventory, currency, features. Started only by
+# the real server (__main__), never on import, so tests stay read-only.
+import sheet_watch as _sheet_watch
+
+
+def _sheet_campaign_dir():
+    name = _active_campaign_name()
+    if not name:
+        return None
+    try:
+        d = _find_campaign(name)
+    except (OSError, ValueError):
+        return None
+    return d if d.is_dir() else None
+
+
+def _apply_sheet_update(update: dict) -> bool:
+    """Merge one sheet-led player update into the stats (only an existing player)."""
+    with _stats_lock:
+        players = _current_stats.get("players") or []
+        low = (update.get("name") or "").lower()
+        match = next((p for p in players if (p.get("name") or "").lower() == low), None)
+        if match is None:
+            return False
+        changed = False
+        for key, val in update.items():
+            if key == "name":
+                continue
+            if isinstance(val, dict) and isinstance(match.get(key), dict):
+                for k2, v2 in val.items():
+                    if match[key].get(k2) != v2:
+                        match[key][k2] = v2
+                        changed = True
+            elif match.get(key) != val:
+                match[key] = val
+                changed = True
+        _coins_out_of_inventories([match])
+        current = dict(_current_stats)
+    if changed:
+        _persist_stats()
+        _broadcast({"stats": current})
+    return True
+
+
+_sheet_watcher = _sheet_watch.SheetWatcher(_sheet_campaign_dir, _apply_sheet_update)
+
 if __name__ == "__main__":
+    _sheet_watcher.start()
     # Wire audio SFX broadcast now that _broadcast is defined
     if _audio:
         _audio.set_broadcast(_broadcast)

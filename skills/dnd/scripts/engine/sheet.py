@@ -75,8 +75,32 @@ def _spell_slots(section: str) -> dict:
     return slots
 
 
+_PLACEHOLDER = re.compile(
+    r"^(?:keine?r?|nichts|none|nothing|n/?a|[-–—]+)(?:\s*[(:].*)?\.?$", re.IGNORECASE)
+
+
+def is_placeholder(item: str) -> bool:
+    """'keine', 'keine (Ungerüstete Verteidigung)', '—' … are notes on an empty
+    group, not things a character carries (Sitzung 5)."""
+    return bool(_PLACEHOLDER.match((item or "").strip()))
+
+
+def features(text: str) -> "list[dict]":
+    """[{name, text}] from the bold-named bullets under '## Features & Traits'
+    ('- **Rage (Kampfrausch)** — …'); Markdown emphasis removed."""
+    out = []
+    for line in _section(text, "Features & Traits").splitlines():
+        m = re.match(r"^\s*-\s+\*\*(.+?)\*\*\s*(?:[—–:-]\s*)?(.*)$", line)
+        if not m:
+            continue
+        body = re.sub(r"\*\*?([^*]+?)\*\*?", r"\1", m.group(2)).strip()
+        out.append({"name": m.group(1).strip(), "text": body})
+    return out
+
+
 def _inventory(section: str) -> dict:
-    """{group: [line, …]} from '**Group:**' headers and '- ' bullets; currency excluded."""
+    """{group: [line, …]} from '**Group:**' headers and '- ' bullets; currency and
+    placeholders ('keine …') excluded."""
     groups: dict = {}
     current = None
     for line in section.splitlines():
@@ -87,7 +111,7 @@ def _inventory(section: str) -> dict:
                 groups.setdefault(current, [])
             continue
         item = re.match(r"^\s*-\s+(.+?)\s*$", line)
-        if item and current is not None:
+        if item and current is not None and not is_placeholder(item.group(1)):
             groups[current].append(item.group(1))
     return groups
 

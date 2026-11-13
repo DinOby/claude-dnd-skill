@@ -18,6 +18,7 @@ import tempfile
 from typing import Optional
 
 from engine import PROTOCOL_VERSION
+from engine.sheet import is_placeholder
 
 STATE_NAME = "state.json"
 
@@ -71,6 +72,11 @@ def apply(state: dict, event: dict) -> dict:
     if t == "import":
         new = empty()
         new["characters"] = copy.deepcopy(d.get("characters", {}))
+        for fig in new["characters"].values():       # 'keine …' is no item (Sitzung 5)
+            inv = fig.get("inventory") if isinstance(fig, dict) else None
+            if isinstance(inv, dict):
+                fig["inventory"] = {g: [i for i in items if not is_placeholder(i)]
+                                    for g, items in inv.items()}
         new["imported_seq"] = event["seq"]
         state.clear()
         state.update(new)
@@ -160,7 +166,8 @@ def _apply_figure(fig: dict, t: str, d: dict) -> None:
         if "xp_next" in d:
             fig["xp_next"] = d["xp_next"]
     elif t == "inventory.add":
-        fig["inventory"].setdefault("Neu", []).append(d["item"])
+        if not is_placeholder(d["item"]):
+            fig["inventory"].setdefault("Neu", []).append(d["item"])
     elif t == "inventory.remove":
         for group, items in fig["inventory"].items():
             kept = _ci_remove(items, d["item"])
