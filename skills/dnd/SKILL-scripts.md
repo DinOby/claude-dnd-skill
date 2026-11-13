@@ -260,7 +260,7 @@ Templates (`display/map-templates/`, own ones or replacements in `<data-root>/ma
 
 **Scene memory:** `--scene-set "Schimmelsteg (Tropfviertel)"` brings back the stored map of that place by itself (map id = slug of the place, with or without the bracketed district, or a map whose name equals the place). A place seen for the first time still needs `--map-new`.
 
-**Map tabs:** every map shown with `--map-new` / `--map-show` becomes a tab (the last 4; travel-event maps never). When the party splits, show the second place's map once — players can then switch between both in the tab bar while the DM stays on the live one. `--map-tab-close ID` removes a tab.
+**Map tabs:** every map shown with `--map-new` / `--map-show` becomes a tab (the last 4; travel-event maps never). When the party splits, show the second place's map once — players can then switch between both in the tab bar while the DM stays on the live one. `--map-tab-close ID` removes a tab. **One place per player character (since Sitzung 5):** when a map is set, shown or patched with a `pc` token, that character is removed from every other map of the campaign, and a map left without any player character loses its tab — so a PC who walks on never stays behind on the old map. The response lists what moved (warnings). NPCs, objects and travel-event maps are not touched. On a scene change every screen follows the DM to the new map, also one that was looking at another tab.
 
 **Token stat blocks (players click a token to see them):**
 ```bash

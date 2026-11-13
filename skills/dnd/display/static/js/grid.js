@@ -491,6 +491,10 @@
 
   /* The DM's map changed: keep it as the live map; show it unless this viewer looks at another tab. */
   function setMap(next, nextImages) {
+    // A new live map is a scene change: every screen follows the DM, even one
+    // that was looking at another tab (Sitzung 5 — an old map stayed up).
+    const sceneChanged = !!next && !!liveMap && next.id !== liveMap.id;
+    if (sceneChanged) previewId = null;
     liveMap = next || null;
     if (nextImages !== undefined) liveImages = mergeImages({ floor: null, terrain: {}, tokens: {} }, nextImages || {});
     if (!liveMap) liveImages = { floor: null, terrain: {}, tokens: {} };
@@ -644,6 +648,7 @@
     _tabList: tabList,
     _live: () => liveMap,
     _previewId: () => previewId,
+    _setPreview: id => { previewId = id || null; },
     _infoLines: infoLines,
     _hpFor: hpFor,
   };
@@ -661,7 +666,12 @@
 
   if (window.DisplayModules) {
     DisplayModules.register('grid', payload => {
-      if (Array.isArray(payload.map_tabs)) { tabs = payload.map_tabs; renderTabbar(); }
+      if (Array.isArray(payload.map_tabs)) {
+        tabs = payload.map_tabs;
+        // the tab this viewer looks at was closed (place left): back to the live map
+        if (previewId && !tabs.some(tb => tb.id === previewId)) backToLive();
+        else renderTabbar();
+      }
       if ('map' in payload) setMap(payload.map, payload.map_images || {});
       if (payload.map_patch) onPatch(payload.map_patch, payload.map_images);
       if (payload.stats) onTurn(payload.stats);

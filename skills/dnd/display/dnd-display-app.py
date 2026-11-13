@@ -2728,8 +2728,11 @@ def _reconcile_scene(broadcast: bool = True, full: bool = True) -> "list[str]":
                                    "tokens": _party_tokens(None) + list(ev.get("tokens") or [])},
                                   temporary=True)
                 warnings += [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
+            warnings += list(_maps.last_moved)
             if broadcast:
                 _broadcast_main(_map_message(m))
+                if _maps.last_moved:
+                    _broadcast_main({"map_tabs": _maps.tabs()})
     except (_grid_map.MapError, OSError) as e:
         warnings.append(f"map for the scene not shown: {e}")
     if broadcast and state["mode"] in ("travel", "travel_event"):
@@ -2817,6 +2820,8 @@ def map_post():
             if any(applied.get(k) for k in ("move", "add", "remove", "update")):   # a pure re-add changes nothing
                 _broadcast_main({"map_patch": applied,
                                  "map_images": _map_images(_maps.current(), applied.get("add", []))})
+            if _maps.last_moved:
+                _broadcast_main({"map_tabs": _maps.tabs()})
             return jsonify({"map_id": applied["map_id"], "rev": applied["rev"], "warnings": warnings})
         else:
             return jsonify({"errors": ["expected map, show, patch or hide"]}), 400
@@ -2825,7 +2830,10 @@ def map_post():
     except OSError as e:
         return jsonify({"errors": [f"could not save the map: {e}"]}), 500
     warnings = [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
+    warnings += list(_maps.last_moved)
     _broadcast_main(_map_message(m))
+    if _maps.last_moved:
+        _broadcast_main({"map_tabs": _maps.tabs()})
     if _scenes.get().get("map_id") != m["id"]:
         _broadcast_main({"scene_state": _scenes.update(map_id=m["id"])})   # the scene's map now
     return jsonify({"map_id": m["id"], "rev": m["rev"], "warnings": warnings})

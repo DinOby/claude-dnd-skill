@@ -693,6 +693,7 @@ class MapStore:
         self.templates = templates or MapTemplates()
         self._lock = threading.Lock()
         self._current: Optional[dict] = None
+        self.last_moved: "list[str]" = []     # notes from the last one-place-per-PC cleanup
         self._load_active()
 
     # ── files ──
@@ -796,6 +797,7 @@ class MapStore:
             self._save(m, layout=True)
             self._current = m
             self._remember(m)
+            self.last_moved = self._evict_party_elsewhere(m)
             return copy.deepcopy(m)
 
     def show(self, map_id: str) -> dict:
@@ -807,7 +809,60 @@ class MapStore:
             _write_json(self._active_path(), {"map_id": m["id"]})
             self._current = m
             self._remember(m)
+            self.last_moved = self._evict_party_elsewhere(m)
             return copy.deepcopy(m)
+
+    # ── one place per player character (Sitzung 5) ──
+    def _evict_party_elsewhere(self, m: dict) -> "list[str]":
+        """A player character stands in one place only.
+
+        Every pc token on `m` is removed from the campaign's other maps; a map
+        left without any pc loses its tab (the party has left that place).
+        Caller holds the lock. Temporary event maps neither evict nor lose
+        tokens (the party returns to its place after the event). Returns
+        human-readable notes for the DM.
+        """
+        notes: "list[str]" = []
+        if m.get("temporary"):
+            return notes
+        names = {str(tok.get("name", "")).casefold() for tok in m.get("tokens") or []
+                 if tok.get("kind") == "pc"}
+        if not names:
+            return notes
+        try:
+            files = sorted(os.listdir(self.placement_dir))
+        except OSError:
+            return notes
+        tab_ids = self._tab_ids()
+        for fname in files:
+            if not fname.endswith(".json") or fname in ("active.json", "tabs.json"):
+                continue
+            other_id = fname[:-5]
+            if other_id == m["id"]:
+                continue
+            path = os.path.join(self.placement_dir, fname)
+            placement = _read_json(path)
+            if not isinstance(placement, dict) or placement.get("temporary"):
+                continue
+            tokens = placement.get("tokens")
+            if not isinstance(tokens, list):
+                continue
+            kept = [tok for tok in tokens
+                    if not (isinstance(tok, dict) and tok.get("kind") == "pc"
+                            and str(tok.get("name", "")).casefold() in names)]
+            if len(kept) == len(tokens):
+                continue
+            gone = [tok.get("name") for tok in tokens if tok not in kept]
+            placement["tokens"] = kept
+            placement["rev"] = int(placement.get("rev") or 0) + 1
+            _write_json(path, placement)
+            notes.append(f"{', '.join(gone)}: left '{other_id}' (now on '{m['id']}')")
+            if other_id in tab_ids and not any(isinstance(tok, dict) and tok.get("kind") == "pc"
+                                               for tok in kept):
+                tab_ids = [i for i in tab_ids if i != other_id]
+                _write_json(self._tabs_path(), {"tabs": tab_ids})
+                notes.append(f"tab '{other_id}' closed — no player character is there any more")
+        return notes
 
     # ── tabs: the maps shown most recently, for viewers to switch between ──
     MAX_TABS = 4
@@ -853,7 +908,9 @@ class MapStore:
             new, applied, warnings = apply_patch(self._current, patch)
             self._save(new, layout=False)
             self._current = new
-            return applied, warnings
+            self.last_moved = (self._evict_party_elsewhere(new)
+                               if any(tok.get("kind") == "pc" for tok in applied.get("add") or []) else [])
+            return applied, warnings + self.last_moved
 
     def hide(self) -> None:
         """Take the map off screen; files stay — except a temporary map's, which is discarded."""

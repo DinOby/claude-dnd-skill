@@ -7,6 +7,9 @@ A2  The display follows sheet changes (armour class, inventory, features) withou
 A3  A requested roll is rolled on the DM's terms: die, bonus and advantage come
     from the request, whatever the dialog sends.
 A4  Placeholders such as "keine (Ungerüstete Verteidigung)" are no items.
+A5  A scene change replaces the map everywhere: a player character stands on one
+    map only (left places lose the token and their tab), and every screen
+    follows the DM to the new map, also one that was looking at another tab.
 """
 from __future__ import annotations
 
@@ -321,6 +324,103 @@ class DiceTermsTests(unittest.TestCase):
         self._roll(request_id=rid, modifier=7)
         status = self.client.get(f"/dice-request/{rid}").get_json()
         self.assertTrue(status.get("complete"))
+
+
+class OnePlacePerPcTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "skills" / "dnd" / "display"))
+        import grid_map
+        self.gm = grid_map
+        self._d = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self._d.name)
+        self.place = base / "placement"
+        self.store = grid_map.MapStore(str(base / "library"), str(self.place))
+
+    def tearDown(self):
+        self._d.cleanup()
+
+    def _map(self, map_id, tokens):
+        return {"id": map_id, "name": map_id, "cols": 8, "rows": 6, "terrain": [], "tokens": tokens}
+
+    def _names(self, map_id):
+        data = json.loads((self.place / f"{map_id}.json").read_text(encoding="utf-8"))
+        return [t["name"] for t in data["tokens"]]
+
+    def test_a_pc_on_the_new_map_leaves_the_old_one(self):
+        self.store.set_map(self._map("steg", [
+            {"name": "Grosch", "kind": "pc", "at": "B2"},
+            {"name": "Echse", "kind": "npc", "at": "C2"},
+            {"name": "Mordos", "kind": "pc", "at": "D2"}]))
+        self.store.set_map(self._map("hof", [{"name": "Grosch", "kind": "pc", "at": "A1"}]))
+        self.assertEqual(self._names("steg"), ["Echse", "Mordos"])
+        self.assertTrue(any("Grosch" in n for n in self.store.last_moved))
+        self.assertIn("steg", [t["id"] for t in self.store.tabs()])   # Mordos still there
+
+    def test_a_place_without_any_pc_loses_its_tab(self):
+        self.store.set_map(self._map("keller", [{"name": "Zarith", "kind": "pc", "at": "B2"},
+                                                {"name": "Fass", "kind": "object", "at": "C3"}]))
+        self.store.set_map(self._map("dach", [{"name": "Zarith", "kind": "pc", "at": "A1"}]))
+        self.assertEqual([t["id"] for t in self.store.tabs()], ["dach"])
+        self.assertEqual(self._names("keller"), ["Fass"])
+
+    def test_showing_a_stored_map_also_moves_the_pc(self):
+        self.store.set_map(self._map("a", [{"name": "Grosch", "kind": "pc", "at": "B2"}]))
+        self.store.set_map(self._map("b", []))
+        self.store.patch({"add": [{"name": "Grosch", "kind": "pc", "at": "C3"}]})
+        self.assertEqual(self._names("a"), [])
+        self.store.show("a")            # nobody on a any more; b keeps Grosch
+        self.assertEqual(self._names("b"), ["Grosch"])
+
+    def test_npcs_with_the_same_name_stay(self):
+        self.store.set_map(self._map("a", [{"name": "Wache", "kind": "npc", "at": "B2"}]))
+        self.store.set_map(self._map("b", [{"name": "Wache", "kind": "npc", "at": "B2"}]))
+        self.assertEqual(self._names("a"), ["Wache"])
+
+    def test_an_event_map_takes_nobody_away(self):
+        self.store.set_map(self._map("a", [{"name": "Grosch", "kind": "pc", "at": "B2"}]))
+        self.store.set_map(self._map("ereignis", [{"name": "Grosch", "kind": "pc", "at": "A1"}]),
+                           temporary=True)
+        self.assertEqual(self._names("a"), ["Grosch"])
+
+
+@unittest.skipIf(__import__("shutil").which("node") is None, "node not installed")
+class ViewerFollowsSceneTests(unittest.TestCase):
+    HARNESS = r"""
+const fs = require('fs'), vm = require('vm');
+const files = process.argv.slice(-2);
+const sandbox = { location: { search: '' }, URLSearchParams, console };
+sandbox.window = sandbox;
+for (const f of files) vm.runInNewContext(fs.readFileSync(f, 'utf8'), sandbox);
+const w = sandbox.window, G = w.GridView, D = w.DisplayModules;
+const a = { id: 'markt', rev: 1, cols: 4, rows: 4, tokens: [] };
+const b = { id: 'dach', rev: 1, cols: 4, rows: 4, tokens: [] };
+const out = {};
+D.dispatch({ map: a });
+G._setPreview('keller');
+D.dispatch({ map_patch: { map_id: 'markt', base: 1, rev: 2, move: [] } });
+out.keptOnPatch = G._previewId();
+D.dispatch({ map: b });
+out.afterSceneChange = G._previewId();
+G._setPreview('markt');
+D.dispatch({ map_tabs: [{ id: 'dach', name: 'Dach' }] });
+out.afterTabClosed = G._previewId();
+G._setPreview('dach-alt');
+D.dispatch({ map_tabs: [{ id: 'dach', name: 'Dach' }, { id: 'dach-alt', name: 'Alt' }] });
+out.openTabKept = G._previewId();
+console.log(JSON.stringify(out));
+"""
+
+    def test_screens_follow_the_dm(self):
+        import subprocess
+        js = ROOT / "skills" / "dnd" / "display" / "static" / "js"
+        proc = subprocess.run(["node", "-e", self.HARNESS, str(js / "modules.js"), str(js / "grid.js")],
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        out = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(out["keptOnPatch"], "keller")      # same scene: the viewer may look around
+        self.assertIsNone(out["afterSceneChange"])           # new scene: everyone follows
+        self.assertIsNone(out["afterTabClosed"])             # closed place: back to live
+        self.assertEqual(out["openTabKept"], "dach-alt")
 
 
 if __name__ == "__main__":
