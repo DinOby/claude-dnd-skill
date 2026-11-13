@@ -77,17 +77,20 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award \
 python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award \
   --campaign <name> --characters "Max of Thraxx,Ethros the 19th" --difficulty medium --type noncombat \
   --note "guild informant interrogation"
+
+# After a finished quest (difficulty-rated; --note with the quest name is required):
+python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award   --campaign <name> --characters "Max of Thraxx,Ethros the 19th" --type quest --difficulty hard   --note "quest name"
 ```
 
 **Difficulty tiers:** `easy` `medium` `hard` `deadly`
-**Encounter types:** `combat` `noncombat` (both use the same difficulty threshold table)
+**Encounter types:** `combat` `noncombat` `quest` (all use the same difficulty threshold table; `quest` = finished quest, needs `--note`, no `--monsters`)
 **Monster CR formats:** `1/4`, `0.25`, `1/2`, `0.5`, `1/8`, `0.125`, or integer (`1`, `5`, `10`)
 **Monster count:** omit for 1 (e.g. `"dragon:10"`); explicit for groups (e.g. `"goblin:1/4:3"`)
 **Monster multiplier** ×1 (1), ×1.5 (2), ×2 (3–6), ×2.5 (7–10), ×3 (11–14), ×4 (15+) — only rates the difficulty; the XP awarded is the raw monster XP split among the characters.
 
 **Correcting an award:** `xp.py correct --campaign <name> --character "<PC>" --amount -50 --note "why"` (sheet, display and ledger together).
 
-`award` updates the character file XP field, flags LEVEL UP PENDING if a threshold is crossed, and pushes XP to the display via `push_stats.py`. The `--note` label prints to terminal only — not stored.
+`award` updates the character file XP field, flags LEVEL UP PENDING if a threshold is crossed, and pushes XP to the display via `push_stats.py`. The `--note` text is the award's reason: it is stored in `xp-ledger.jsonl` and in the game-state log (`xp.award` with `note`, `kind`, `difficulty`).
 
 ---
 

@@ -21,6 +21,15 @@ Usage:
     # Award for a qualifying non-combat encounter:
     python3 xp.py award --campaign my-campaign --characters "Aldric,Mira" \\
         --difficulty medium --type noncombat --note "guild informant interrogation"
+
+    # Award for a finished quest (table rule: like a medium to hard combat):
+    python3 xp.py award --campaign my-campaign --characters "Aldric,Mira" \\
+        --type quest --difficulty hard --note "Die vermissten Bergleute gefunden"
+
+The --note text is the reason for the award. It is kept in the XP ledger and
+the game-state log next to the kind and difficulty (e.g. "Brenn-Knechte
+ueberredet"), so later checks show *why* XP was given, not just "medium combat".
+A quest award needs a --note (the quest name).
 """
 
 import sys
@@ -339,9 +348,19 @@ def _ledger_path(campaign: str) -> pathlib.Path:
     return CAMPAIGNS_DIR / campaign / LEDGER_NAME
 
 
-def _record_award(campaign: str, entries: list, note: str) -> None:
+def _record_award(campaign: str, entries: list, note: str,
+                  kind: "str | None" = None, difficulty: "str | None" = None) -> None:
     """Append one line per character. Never raises — a ledger write must not
-    cost a player their XP, which is already on the sheet by the time we run."""
+    cost a player their XP, which is already on the sheet by the time we run.
+
+    `note` is the reason in words (falls back to "<difficulty> <kind>");
+    `kind` (combat | noncombat | quest | correction) and `difficulty` are kept
+    as separate fields so the reason never has to carry them."""
+    extra = {}
+    if kind:
+        extra["kind"] = kind
+    if difficulty:
+        extra["difficulty"] = difficulty
     try:
         path = _ledger_path(campaign)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -355,6 +374,7 @@ def _record_award(campaign: str, entries: list, note: str) -> None:
                     "awarded": e["awarded"],
                     "total_after": e["total_after"],
                     "note": note,
+                    **extra,
                 }, ensure_ascii=False) + "\n")
     except Exception as exc:                      # noqa: BLE001
         print(f"xp.py: warning — could not write the award ledger: {exc}",
@@ -363,6 +383,7 @@ def _record_award(campaign: str, entries: list, note: str) -> None:
         _shadow.record(CAMPAIGNS_DIR / campaign,
                        [("xp.award", {"who": e["name"], "awarded": e["awarded"],
                                       "total_after": e["total_after"], "note": note,
+                                      **extra,
                                       **({"next": e["next"]} if e.get("next") is not None else {})})
                         for e in entries],
                        src="xp")
@@ -437,7 +458,14 @@ def cmd_award(args: argparse.Namespace) -> None:
     campaign   = args.campaign
     char_names = [c.strip() for c in args.characters.split(",")]
     enc_type   = (args.type or ("combat" if args.monsters else "noncombat")).lower()
-    note       = args.note or ""
+    note       = (args.note or "").strip()
+    if enc_type == "quest" and args.monsters:
+        print("A quest award is difficulty-rated — use --difficulty, not --monsters.", file=sys.stderr)
+        sys.exit(1)
+    if enc_type == "quest" and not note:
+        print("A quest award needs --note with the quest's name (the reason is kept in the ledger).",
+              file=sys.stderr)
+        sys.exit(1)
 
     # Load character state from files
     chars = []
@@ -479,7 +507,7 @@ def cmd_award(args: argparse.Namespace) -> None:
             sys.exit(1)
         diff       = args.difficulty.lower()
         per_player = _xp_per_player(diff, avg_level)
-        type_label = f"  [{enc_type}]" if enc_type == "noncombat" else ""
+        type_label = f"  [{enc_type}]" if enc_type in ("noncombat", "quest") else ""
         print(f"\n  {diff.upper()} {enc_type.upper()}{type_label} — Level {avg_level} party of {players}")
         print(f"  Per player: {per_player:,} XP")
 
@@ -509,7 +537,8 @@ def cmd_award(args: argparse.Namespace) -> None:
 
     # Recorded AFTER the sheets are written, so the ledger never claims an
     # award that did not land.
-    _record_award(campaign, _ledger_entries, note=f"{diff} {enc_type}")
+    _record_award(campaign, _ledger_entries, note=note or f"{diff} {enc_type}",
+                  kind=enc_type, difficulty=diff)
 
     if any_levelup:
         print("\n  Level-up pending — run /dnd character level-up")
@@ -534,7 +563,7 @@ def cmd_correct(args: argparse.Namespace) -> None:
     _push_xp_display(name, new_xp, written_next)
     _record_award(args.campaign, [{"name": name, "awarded": new_xp - xp,
                                    "total_after": new_xp, "next": written_next}],
-                  note=f"correction: {args.note}")
+                  note=f"correction: {args.note}", kind="correction")
     print(f"  {name}: {xp:,} {args.amount:+,} = {new_xp:,} / {_next_level_xp(level):,}  ({args.note})")
 
 
@@ -556,7 +585,7 @@ def main() -> None:
                         help="Number of players (default: 4)")
     calc_p.add_argument("--difficulty", choices=["easy", "medium", "hard", "deadly"],
                         help="Encounter difficulty tier")
-    calc_p.add_argument("--type",       choices=["combat", "noncombat"], default="combat",
+    calc_p.add_argument("--type",       choices=["combat", "noncombat", "quest"], default="combat",
                         help="Encounter type (default: combat)")
     calc_p.add_argument("--monsters",   metavar="LIST",
                         help="name:cr:count,... e.g. 'goblin:1/4:3,orc:1/2:2'")
@@ -569,12 +598,14 @@ def main() -> None:
                          help="Comma-separated character names matching campaign files")
     award_p.add_argument("--difficulty", choices=["easy", "medium", "hard", "deadly"],
                          help="Encounter difficulty tier (required unless --monsters provided)")
-    award_p.add_argument("--type",       choices=["combat", "noncombat"],
-                         help="Encounter type (default: combat if --monsters, else noncombat)")
+    award_p.add_argument("--type",       choices=["combat", "noncombat", "quest"],
+                         help="combat | noncombat | quest (default: combat if --monsters, else "
+                              "noncombat). quest = finished quest, difficulty-rated, needs --note")
     award_p.add_argument("--monsters",   metavar="LIST",
                          help="name:cr:count,... for exact CR-based calculation")
     award_p.add_argument("--note",       metavar="TEXT",
-                         help="Brief label for this award (printed only, not stored)")
+                         help="Reason for this award in words — kept in the XP ledger and the "
+                              "game-state log (e.g. 'Brenn-Knechte überredet')")
 
     corr_p = sub.add_parser("correct", help="Add or take back a fixed XP amount (with a reason)")
     corr_p.add_argument("--campaign", required=True, metavar="NAME")

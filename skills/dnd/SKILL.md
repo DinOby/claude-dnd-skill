@@ -517,9 +517,14 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award \
   --campaign $CAMP --characters "Max of Thraxx,Ethros the 19th" --difficulty medium --type noncombat \
   --note "brief description"
 
+# After a finished quest (difficulty-rated; --note with the quest name is required):
+python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py award   --campaign $CAMP --characters "Max of Thraxx,Ethros the 19th" --type quest --difficulty hard   --note "quest name"
+
 # Preview before awarding:
 python3 ${CLAUDE_SKILL_DIR}/scripts/xp.py calc --level 3 --players 2 --difficulty hard
 ```
+
+**Always pass `--note` with the reason in words** ("Brenn-Knechte überredet", "Kassette von Asch ertäuscht"). It is stored in the XP ledger and the game-state log next to `kind` and `difficulty`; without it the ledger only says "medium combat".
 
 Award XP at the **end of the scene** when the outcome is clear — not mid-combat or mid-negotiation. If a session ends before XP is awarded, note it in the session log and award at the start of the next session before anything else.
 
