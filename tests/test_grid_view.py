@@ -141,13 +141,15 @@ class GridScriptTests(unittest.TestCase):
 
     def test_info_card_lines(self):
         keys = [(l["k"], l["v"]) for l in self.out["info"]]
-        self.assertIn(("HP", "3 / 7"), keys)
-        self.assertIn(("AC", "15"), keys)
-        self.assertIn(("Attack", "Krummsäbel +4, 1W6+2"), keys)
-        self.assertIn(("Notes", "nervös"), keys)
+        # Phase 1: the map speaks German (TP, RK, Angriff ...)
+        self.assertIn(("kind", "Gegner"), keys)
+        self.assertIn(("TP", "3 / 7"), keys)
+        self.assertIn(("RK", "15"), keys)
+        self.assertIn(("Angriff", "Krummsäbel +4, 1W6+2"), keys)
+        self.assertIn(("Notizen", "nervös"), keys)
         pc = [(l["k"], l["v"]) for l in self.out["info_pc"]]
-        self.assertIn(("HP", "5 / 12"), pc)
-        self.assertIn(("Conditions", "Poisoned"), pc)
+        self.assertIn(("TP", "5 / 12"), pc)
+        self.assertIn(("Zustände", "Poisoned"), pc)
 
     def test_tab_list_always_contains_the_live_map(self):
         with_live, already, empty = self.out["tab_list"]

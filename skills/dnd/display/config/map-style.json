@@ -1,0 +1,34 @@
+{
+  "_comment": "Central look of the battle map (Phase 1, B3). Override any key in <data-root>/config/map-style.json. 'active' names the style the display uses; 'neutral' needs no pictures (drawn in the browser).",
+  "active": "neutral",
+  "rules": {
+    "perspective": "top-down, straight from above, no tilt, no isometric view",
+    "light": "soft light from the upper left (north-west); shadows fall to the lower right",
+    "readability": "every square stays readable: high contrast between floor and obstacles, figures always on top, no clutter on walkable squares",
+    "forbidden": ["text, letters or numbers in pictures", "isometric or tilted views", "photorealism", "neon or oversaturated colours", "grid lines baked into textures", "people or creatures in floor textures", "watermarks or frames"]
+  },
+  "styles": {
+    "neutral": {
+      "name": "Neutral (Platzhalter)",
+      "description": "Drawn in the browser, muted colours, no pictures needed. Used until a style is chosen.",
+      "detail": "low",
+      "shadow": 0.32,
+      "grid_alpha": 0.16,
+      "textures": {},
+      "palette": {
+        "grass": "#6c8a4b", "dirt": "#86694a", "stone": "#7a766e", "cobble": "#6f6b64", "wood": "#8c6b45",
+        "earth": "#6c5b47", "sand": "#c0a679", "floor": "#7b7569", "snow": "#e4eaec", "mud": "#5c4a36",
+        "moss": "#5f7a48", "tiles": "#8b8478", "gravel": "#8a857c",
+        "water": "#3d6b8a", "deep-water": "#294b66", "shallow-water": "#5e8ea5", "road": "#a08766",
+        "path": "#93805f", "difficult": "#7d6a50", "cliff": "#3a3530", "chasm": "#151413", "lava": "#c2521f",
+        "ice": "#bcd6df", "rubble": "#7a7064", "swamp": "#4e5a3b",
+        "bank": "#c9bb8b", "road_edge": "#6d5a42",
+        "wall": "#4b4641", "wall_top": "#6f685f", "bars": "#2f2f31",
+        "object": "#b28f5f", "object_dark": "#4a3622", "foliage": "#4f7a3c", "foliage_dark": "#365a2a",
+        "rock": "#8b877f", "metal": "#8f939a", "cloth": "#9a4b3c", "fire": "#e0832f",
+        "pc": "#3f7fd8", "npc": "#3aa36b", "enemy": "#d2453a", "object_token": "#c9a227",
+        "turn": "#f2c14e", "range": "#5fb3ff", "trail": "#f2e3b3", "exit": "#f2e3b3"
+      }
+    }
+  }
+}

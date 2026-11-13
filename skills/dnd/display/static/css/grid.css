@@ -14,10 +14,12 @@
   --grid-bg-a: #1d1710;
   --grid-bg-b: #120e09;
   --grid-label: rgba(232, 200, 130, 0.55);
-  --grid-pc: #d9a441;
-  --grid-npc: #5fa7a0;
-  --grid-enemy: #c8483c;
-  --grid-object: #8b8b8b;
+  /* figure colours = config/map-style.json palette (Phase 1); gold is the turn marker */
+  --grid-pc: #3f7fd8;
+  --grid-npc: #3aa36b;
+  --grid-enemy: #d2453a;
+  --grid-object: #c9a227;
+  --grid-turn: #f2c14e;
 }
 :root[data-theme="light"] {
   --grid-line: rgba(70, 50, 20, 0.18);
@@ -350,3 +352,49 @@ body.grid-on.grid-size-side #new-content-pill { left: auto; right: calc(var(--si
   .grid-token { transition: opacity 200ms ease; }
   .grid-token-turn .grid-token-disc { animation: none; }
 }
+
+/* ── Phase 1: PixiJS map, tools, legend, hints ───────────────────────────── */
+.grid-board canvas.grid-canvas { display: block; }
+.grid-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  font-size: 12px; color: var(--grid-label); margin: 0 0 4px;
+}
+.grid-scale { font-weight: 600; letter-spacing: .02em; }
+.grid-coords-hint { opacity: .8; }
+.grid-tool {
+  font: inherit; font-size: 12px; padding: 2px 9px; border-radius: 10px; cursor: pointer;
+  background: rgba(0, 0, 0, .28); color: inherit; border: 1px solid var(--grid-line);
+}
+.grid-tool.on { border-color: var(--grid-turn); color: var(--grid-turn); }
+.grid-tool:focus-visible { outline: 2px solid var(--grid-turn); outline-offset: 1px; }
+.grid-legend {
+  position: absolute; left: 6px; bottom: 6px; z-index: 5; max-width: 300px;
+  background: rgba(18, 14, 9, .92); color: #efe6cf; border: 1px solid rgba(232, 200, 130, .3);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.35;
+}
+:root[data-theme="light"] .grid-legend { background: rgba(250, 243, 226, .97); color: #2d2010; }
+.grid-legend-row { display: flex; align-items: center; gap: 8px; margin: 2px 0; }
+.grid-legend-foot { margin-top: 6px; opacity: .75; font-size: 11px; }
+.grid-legend-sym { width: 16px; height: 16px; flex: 0 0 16px; background: var(--lg, #888); }
+.lg-circle { border-radius: 50%; }
+.lg-square { border-radius: 4px; }
+.lg-diamond { clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.lg-hexagon { clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%); }
+.lg-mark.lg-turn { background: transparent; border: 3px solid var(--lg, var(--grid-turn)); border-radius: 50%; }
+.lg-mark.lg-exit { clip-path: polygon(0 20%, 60% 20%, 60% 0, 100% 50%, 60% 100%, 60% 80%, 0 80%); }
+.lg-mark.lg-range { opacity: .55; border-radius: 2px; }
+.lg-mark.lg-water { border-radius: 5px; box-shadow: inset 0 0 0 2px #c9bb8b; }
+.grid-tip {
+  position: fixed; z-index: 60; max-width: 260px; pointer-events: none;
+  background: rgba(18, 14, 9, .95); color: #efe6cf; border: 1px solid rgba(232, 200, 130, .35);
+  border-radius: 8px; padding: 6px 9px; font-size: 13px; line-height: 1.35;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45);
+}
+.grid-tip[hidden] { display: none; }
+.grid-tip-title { font-weight: 700; margin-bottom: 2px; }
+.grid-tip-line { opacity: .9; }
+:root[data-theme="light"] .grid-tip { background: rgba(250, 243, 226, .98); color: #2d2010; }
+.grid-turn-now {
+  font-weight: 700; color: var(--grid-turn); white-space: nowrap; padding: 0 6px 0 2px;
+}
+.grid-tools, .grid-legend, .grid-board canvas.grid-canvas { pointer-events: auto; }

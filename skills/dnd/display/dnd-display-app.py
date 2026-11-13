@@ -2625,10 +2625,37 @@ def _map_images(m: "Optional[dict]", tokens: "Optional[list]" = None) -> dict:
     return images
 
 
+_map_style_cfg = None
+
+
+def _map_style() -> dict:
+    """The active map style from config/map-style.json (data-root override wins)."""
+    global _map_style_cfg
+    try:
+        if _map_style_cfg is None:
+            from config_loader import ConfigFile
+            _map_style_cfg = ConfigFile("map-style.json")   # re-read when the file changes
+        cfg = _map_style_cfg.get()
+    except Exception:                                   # noqa: BLE001 — the map draws without it
+        return {"id": "neutral"}
+    styles = cfg.get("styles") or {}
+    active = cfg.get("active") if cfg.get("active") in styles else "neutral"
+    return dict(styles.get(active) or {}, id=active)
+
+
+def _map_meta(m: "Optional[dict]") -> dict:
+    """What the browser needs to draw a map besides the map itself: the squares a
+    figure cannot enter (for the reach overlay) and the active style (Phase 1)."""
+    if not m:
+        return {}
+    import map_v2 as _mv2
+    return {"blocked": sorted([x, y] for x, y in _mv2.blockers(m)), "style": _map_style()}
+
+
 def _map_message(m: "Optional[dict]") -> dict:
     """SSE payload for a full map: the map plus its image URLs (the model itself stays URL-free),
     and the tabs (maps shown recently) viewers can switch between."""
-    msg = {"map": m, "map_images": _map_images(m)} if m else {"map": None}
+    msg = {"map": m, "map_images": _map_images(m), "map_meta": _map_meta(m)} if m else {"map": None}
     msg["map_tabs"] = _maps.tabs()
     return msg
 
@@ -2646,9 +2673,10 @@ def map_get():
         m = _maps.peek(want)
         if m is None:
             return jsonify({"errors": [f"no map '{want}'"]}), 404
-        return jsonify({"map": m, "images": _map_images(m), "preview": True, "tabs": _maps.tabs()})
+        return jsonify({"map": m, "images": _map_images(m), "meta": _map_meta(m), "preview": True,
+                        "tabs": _maps.tabs()})
     m = _maps.current()
-    return jsonify({"map": m, "images": _map_images(m), "library": _maps.library(),
+    return jsonify({"map": m, "images": _map_images(m), "meta": _map_meta(m), "library": _maps.library(),
                     "templates": _maps.templates.list(), "tabs": _maps.tabs()})
 
 

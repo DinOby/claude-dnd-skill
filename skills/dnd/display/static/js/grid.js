@@ -54,6 +54,16 @@
   let tabs = [];                   // [{id, name}] from the server, most recent first
   const tokenEls = new Map();      // token id → element
   let resyncing = false;
+  // Phase 1: the map is drawn with PixiJS (map-render.js) once it is loaded;
+  // the DOM drawing below stays as the fallback (no WebGL, ?karte=dom).
+  let meta = { blocked: [], style: null };        // map_meta: blocked squares, active style
+  let liveMeta = { blocked: [], style: null };
+  let renderer = null;
+  let rendererState = 'none';                     // none | loading | ready | failed
+  let pendingMoves = null;                        // moves of the last patch, with walking paths
+  let rangeOn = false, legendOpen = false;
+  let tools = null, legend = null, tip = null;
+  const RANGE_KEY = 'dnd-map-range', LEGEND_KEY = 'dnd-map-legend';
   const listeners = [];
 
   // ── Pure helpers (exported for tests) ────────────────────────────────────
@@ -132,26 +142,26 @@
   /* Text lines for the info card of a token (pure: tested in node). */
   function infoLines(tok, playerList) {
     if (!tok) return [];
-    const KIND = { pc: 'Player character', npc: 'Non-player character', enemy: 'Opponent', object: 'Object' };
+    const KIND = { pc: 'Spielerfigur', npc: 'Nichtspielerfigur', enemy: 'Gegner', object: 'Gegenstand' };
     const lines = [{ k: 'kind', v: KIND[tok.kind] || tok.kind }];
     const low = String(tok.name).toLowerCase();
     const p = (playerList || []).find(pl => String(pl.name || '').toLowerCase() === low);
     const st = tok.stats || {};
     const hp = hpFor(tok.name, tok, playerList);
-    if (hp) lines.push({ k: 'HP', v: hp.max != null ? hp.current + ' / ' + hp.max : String(hp.current) });
+    if (hp) lines.push({ k: 'TP', v: hp.max != null ? hp.current + ' / ' + hp.max : String(hp.current) });
     const ac = p && p.ac != null ? p.ac : st.ac;
-    if (ac != null && ac !== '') lines.push({ k: 'AC', v: String(ac) });
-    if (st.cr) lines.push({ k: 'CR', v: String(st.cr) });
-    if (st.speed) lines.push({ k: 'Speed', v: String(st.speed) });
+    if (ac != null && ac !== '') lines.push({ k: 'RK', v: String(ac) });
+    if (st.cr) lines.push({ k: 'HG', v: String(st.cr) });
+    if (st.speed) lines.push({ k: 'Bewegung', v: String(st.speed) });
     const conds = (p && Array.isArray(p.conditions) && p.conditions.length) ? p.conditions : (st.conditions || []);
-    if (conds.length) lines.push({ k: 'Conditions', v: conds.join(', ') });
-    for (const a of st.attacks || []) lines.push({ k: 'Attack', v: String(a) });
+    if (conds.length) lines.push({ k: 'Zustände', v: conds.join(', ') });
+    for (const a of st.attacks || []) lines.push({ k: 'Angriff', v: String(a) });
     if (p && p.sheet && Array.isArray(p.sheet.attacks)) {
       for (const a of p.sheet.attacks.slice(0, 4)) {
-        lines.push({ k: 'Attack', v: [a.name, a.bonus, a.damage].filter(Boolean).join(' ') });
+        lines.push({ k: 'Angriff', v: [a.name, a.bonus, a.damage].filter(Boolean).join(' ') });
       }
     }
-    if (st.notes) lines.push({ k: 'Notes', v: String(st.notes) });
+    if (st.notes) lines.push({ k: 'Notizen', v: String(st.notes) });
     return lines;
   }
 
@@ -224,12 +234,12 @@
     document.head.appendChild(css);
     panel = document.createElement('div');
     panel.id = 'grid-panel';
-    panel.setAttribute('aria-label', 'Battle map');
+    panel.setAttribute('aria-label', 'Kampfkarte');
     title = document.createElement('div');
     title.className = 'grid-title';
     turnbar = document.createElement('div');
     turnbar.className = 'grid-turnbar';
-    turnbar.setAttribute('aria-label', 'Initiative order');
+    turnbar.setAttribute('aria-label', 'Zugreihenfolge');
     board = document.createElement('div');
     board.className = 'grid-board';
     tabbar = document.createElement('div');
@@ -238,12 +248,21 @@
     panel.appendChild(tabbar);
     panel.appendChild(title);
     panel.appendChild(turnbar);
+    tools = document.createElement('div');
+    tools.className = 'grid-tools';
+    panel.appendChild(tools);
     panel.appendChild(board);
+    legend = document.createElement('div');
+    legend.className = 'grid-legend';
+    legend.hidden = true;
+    panel.appendChild(legend);
+    try { rangeOn = localStorage.getItem(RANGE_KEY) === '1'; legendOpen = localStorage.getItem(LEGEND_KEY) === '1'; } catch (_) {}
     document.body.appendChild(panel);
     window.addEventListener('resize', () => { hideInfo(); render(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') hideInfo(); });
     document.addEventListener('click', e => {
-      if (infoCard && !infoCard.contains(e.target) && !(e.target.closest && e.target.closest('.grid-token'))) hideInfo();
+      if (infoCard && !infoCard.contains(e.target)
+          && !(e.target.closest && (e.target.closest('.grid-token') || e.target.closest('.grid-canvas')))) hideInfo();
     });
     // follow the text column when the sidebar or settings column is toggled
     const scroll = document.getElementById('text-scroll');
@@ -288,8 +307,10 @@
     turnbar.textContent = '';
     turnbar.hidden = !entries.length;
     if (turnOrder && turnOrder.round != null && entries.length) {
-      turnbar.appendChild(el('span', 'grid-turn-round', 'Round ' + turnOrder.round));
+      turnbar.appendChild(el('span', 'grid-turn-round', 'Runde ' + turnOrder.round));
     }
+    const now = entries.find(e => e.current);
+    if (now) turnbar.appendChild(el('span', 'grid-turn-now', '▶ ' + now.name + ' ist am Zug'));
     for (const e of entries) {
       const chip = el('div', 'grid-turn-chip grid-kind-' + e.kind + (e.current ? ' is-current' : ''));
       const disc = el('div', 'grid-token-disc');
@@ -310,11 +331,11 @@
         fill.style.width = pct + '%';
         fill.classList.toggle('low', pct <= 33);
         bar.appendChild(fill);
-        bar.title = e.hp.current + ' / ' + e.hp.max + ' HP';
+        bar.title = e.hp.current + ' / ' + e.hp.max + ' TP';
         body.appendChild(bar);
       }
       chip.appendChild(body);
-      chip.title = e.name + (e.hp ? ' — ' + e.hp.current + (e.hp.max ? ' / ' + e.hp.max : '') + ' HP' : '');
+      chip.title = e.name + (e.hp ? ' — ' + e.hp.current + (e.hp.max ? ' / ' + e.hp.max : '') + ' TP' : '');
       turnbar.appendChild(chip);
     }
   }
@@ -346,7 +367,7 @@
       list.appendChild(el('dt', null, line.k === 'kind' ? '' : line.k));
       list.appendChild(el('dd', line.k === 'kind' ? 'grid-info-kind' : null, line.v));
     }
-    if (lines.length <= 1) list.appendChild(el('dd', 'grid-info-empty', 'No stats revealed yet.'));
+    if (lines.length <= 1) list.appendChild(el('dd', 'grid-info-empty', 'Noch keine Werte bekannt.'));
     infoCard.appendChild(list);
     infoCard.hidden = false;
     const r = anchor.getBoundingClientRect();
@@ -368,10 +389,12 @@
     placePanel();
     renderTabbar();
     title.textContent = (map.name || map.id)
-      + (previewId && liveMap ? ' — viewing; the DM is on ' + (liveMap.name || liveMap.id) : '');
+      + (previewId && liveMap ? ' — nur Ansicht; der Spielleiter ist auf ' + (liveMap.name || liveMap.id) : '');
     title.classList.toggle('grid-title-preview', !!previewId);
     renderTurnbar();
-    const barH = (turnbar.hidden ? 0 : turnbar.offsetHeight + 6) + (tabbar.hidden ? 0 : tabbar.offsetHeight + 6);
+    renderTools();
+    const barH = (turnbar.hidden ? 0 : turnbar.offsetHeight + 6) + (tabbar.hidden ? 0 : tabbar.offsetHeight + 6)
+      + (tools && tools.offsetHeight ? tools.offsetHeight + 4 : 0);
     const cell = cellSize(map.cols, map.rows, panel.clientWidth - 8, panel.clientHeight - title.offsetHeight - barH - 8);
     if (!cell) return;
     const gutter = Math.round(cell * 0.8);
@@ -379,6 +402,11 @@
     board.style.setProperty('--gutter', gutter + 'px');
     board.style.width = (gutter + map.cols * cell) + 'px';
     board.style.height = (gutter + map.rows * cell) + 'px';
+    if (wantRenderer()) {
+      if (rendererState === 'ready') { if (pixiRender(cell, gutter)) return; }
+      else if (rendererState === 'none') loadRenderer();
+    }
+    dropRenderer();
 
     // static layer: labels, grid lines, terrain (rebuilt — cheap and rare)
     let field = board.querySelector('.grid-field');
@@ -463,8 +491,152 @@
 
   function clearBoard() {
     tokenEls.clear();
-    if (board) board.textContent = '';
+    if (board && !renderer) board.textContent = '';     // the renderer resets itself on a new map
     if (title) title.textContent = '';
+    hideTip();
+  }
+
+  // ── PixiJS renderer (Phase 1) ────────────────────────────────────────────
+
+  function forceDom() {
+    try {
+      const q = String((typeof location !== 'undefined' && location.search) || '');
+      if (q.indexOf('karte=dom') !== -1) return true;
+      return localStorage.getItem('dnd-map-renderer') === 'dom';
+    } catch (_) { return false; }
+  }
+
+  function wantRenderer() {
+    return typeof document !== 'undefined' && rendererState !== 'failed' && !forceDom();
+  }
+
+  /* Load the vendored PixiJS and the renderer (local files only), then redraw. */
+  function loadRenderer() {
+    rendererState = 'loading';
+    const add = (src, next) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = next;
+      s.onerror = () => { rendererState = 'failed'; render(); };
+      document.head.appendChild(s);
+    };
+    const done = () => { rendererState = window.MapRenderer ? 'ready' : 'failed'; render(); };
+    if (window.PIXI) add('/static/js/map-render.js', done);
+    else add('/static/vendor/pixi.min.js', () => add('/static/js/map-render.js', done));
+  }
+
+  function pixiRender(cell, gutter) {
+    try {
+      board.querySelectorAll('.grid-labels, .grid-field, .grid-token').forEach(n => n.remove());
+      tokenEls.clear();
+      if (!renderer) renderer = new window.MapRenderer(board, { onHover: showTip, onLeave: hideTip, onTap: tapTarget });
+      renderer.render(map, { cell: cell, gutter: gutter, images: images, style: meta.style || {},
+                             blocked: meta.blocked || [], turn: turn, players: players,
+                             moves: pendingMoves, range: rangeOn });
+      pendingMoves = null;
+      return true;
+    } catch (err) {
+      console.error('[GridView] PixiJS map failed, drawing without it:', err);
+      rendererState = 'failed';
+      dropRenderer();
+      return false;
+    }
+  }
+
+  function dropRenderer() {
+    if (!renderer) return;
+    try { renderer.destroy(); } catch (_) {}
+    renderer = null;
+    if (board) board.querySelectorAll('canvas').forEach(n => n.remove());
+  }
+
+  /* An anchor element stand-in at a point on the canvas (for the info card). */
+  function anchorAt(pos) {
+    const r = renderer.app.view.getBoundingClientRect();
+    const x = r.left + pos.x, y = r.top + pos.y;
+    return { getBoundingClientRect: () => ({ left: x - 14, right: x + 14, top: y - 14, bottom: y + 14, width: 28, height: 28 }) };
+  }
+
+  function showTip(target, pos) {
+    if (!renderer || !window.MapRenderer) return;
+    const d = window.MapRenderer.describe(target, players);
+    if (!d) return;
+    if (!tip) { tip = el('div', 'grid-tip'); tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip); }
+    tip.textContent = '';
+    tip.appendChild(el('div', 'grid-tip-title', d.title));
+    for (const line of d.lines) tip.appendChild(el('div', 'grid-tip-line', line));
+    tip.hidden = false;
+    const r = renderer.app.view.getBoundingClientRect();
+    let left = r.left + pos.x + 16, top = r.top + pos.y + 12;
+    const w = tip.offsetWidth || 220, h = tip.offsetHeight || 80;
+    if (left + w > window.innerWidth - 8) left = r.left + pos.x - w - 16;
+    if (top + h > window.innerHeight - 8) top = window.innerHeight - h - 8;
+    tip.style.left = Math.max(8, left) + 'px';
+    tip.style.top = Math.max(8, top) + 'px';
+  }
+
+  function hideTip() { if (tip) tip.hidden = true; }
+
+  function tapTarget(target, pos) {
+    if (target.what === 'token') { hideTip(); showInfo(target.tok, anchorAt(pos)); }
+    else showTip(target, pos);                 // touch screens: a tap shows the hint
+  }
+
+  /* "1 Feld = 1,5 m (5 Fuß)" for the map's square size. */
+  function scaleText(cellFt) {
+    const ft = cellFt || 5;
+    return '1 Feld = ' + String(Math.round(ft * 0.3 * 10) / 10).replace('.', ',') + ' m (' + ft + ' Fuß)';
+  }
+
+  function renderTools() {
+    if (!tools || !map) return;
+    tools.textContent = '';
+    tools.appendChild(el('span', 'grid-scale', scaleText(map.cell_ft)));
+    tools.appendChild(el('span', 'grid-coords-hint', 'Felder: Buchstabe + Zahl, A1 oben links'));
+    if (rendererState !== 'failed' && !forceDom()) {
+      const rb = el('button', 'grid-tool' + (rangeOn ? ' on' : ''), 'Reichweite');
+      rb.type = 'button';
+      rb.setAttribute('aria-pressed', rangeOn ? 'true' : 'false');
+      rb.title = 'Zeigt, wie weit die Figur am Zug in dieser Runde gehen kann';
+      rb.addEventListener('click', () => {
+        rangeOn = !rangeOn;
+        try { localStorage.setItem(RANGE_KEY, rangeOn ? '1' : '0'); } catch (_) {}
+        render();
+      });
+      tools.appendChild(rb);
+    }
+    const lb = el('button', 'grid-tool' + (legendOpen ? ' on' : ''), legendOpen ? 'Legende ▾' : 'Legende ▸');
+    lb.type = 'button';
+    lb.setAttribute('aria-expanded', legendOpen ? 'true' : 'false');
+    lb.addEventListener('click', () => {
+      legendOpen = !legendOpen;
+      try { localStorage.setItem(LEGEND_KEY, legendOpen ? '1' : '0'); } catch (_) {}
+      render();
+    });
+    tools.appendChild(lb);
+    renderLegend();
+  }
+
+  function renderLegend() {
+    if (!legend) return;
+    legend.hidden = !legendOpen;
+    if (!legendOpen) return;
+    legend.textContent = '';
+    const pal = (meta.style && meta.style.palette) || {};
+    const items = window.MapRenderer ? window.MapRenderer.legendItems() : [
+      { shape: 'circle', key: 'pc', text: 'Spielerfigur (S)' }, { shape: 'square', key: 'npc', text: 'Nichtspielerfigur (N)' },
+      { shape: 'diamond', key: 'enemy', text: 'Gegner (G)' }, { shape: 'hexagon', key: 'object_token', text: 'Gegenstand (O)' }];
+    const MARK = { turn: 'turn', exit: 'exit', wall: 'wall', water: 'water', range: 'range' };
+    for (const it of items) {
+      const row = el('div', 'grid-legend-row');
+      const sym = el('span', 'grid-legend-sym ' + (it.shape ? 'lg-' + it.shape : 'lg-mark lg-' + it.mark));
+      const colour = it.key ? pal[it.key] : pal[MARK[it.mark]];
+      if (colour) sym.style.setProperty('--lg', colour);
+      row.appendChild(sym);
+      row.appendChild(el('span', null, it.text));
+      legend.appendChild(row);
+    }
+    legend.appendChild(el('div', 'grid-legend-foot', 'Maus über Figur oder Gegenstand: kurze Erklärung. Klick auf eine Figur: alle Werte.'));
   }
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -476,9 +648,10 @@
   }
 
   /* Put a map on this screen (the live one or a tab preview). */
-  function showMap(next, nextImages) {
+  function showMap(next, nextImages, nextMeta) {
     const sameMap = map && next && map.id === next.id;
     map = next || null;
+    if (nextMeta !== undefined) meta = nextMeta || { blocked: [], style: null };
     if (nextImages !== undefined) images = mergeImages({ floor: null, terrain: {}, tokens: {} }, nextImages || {});
     if (!map) images = { floor: null, terrain: {}, tokens: {} };
     if (typeof document === 'undefined') { notify(); return; }
@@ -490,16 +663,17 @@
   }
 
   /* The DM's map changed: keep it as the live map; show it unless this viewer looks at another tab. */
-  function setMap(next, nextImages) {
+  function setMap(next, nextImages, nextMeta) {
     // A new live map is a scene change: every screen follows the DM, even one
     // that was looking at another tab (Sitzung 5 — an old map stayed up).
     const sceneChanged = !!next && !!liveMap && next.id !== liveMap.id;
     if (sceneChanged) previewId = null;
     liveMap = next || null;
+    if (nextMeta !== undefined) liveMeta = nextMeta || { blocked: [], style: null };
     if (nextImages !== undefined) liveImages = mergeImages({ floor: null, terrain: {}, tokens: {} }, nextImages || {});
     if (!liveMap) liveImages = { floor: null, terrain: {}, tokens: {} };
     if (previewId && (!liveMap || liveMap.id === previewId)) previewId = null;   // the DM came to us
-    if (!previewId) showMap(liveMap, liveImages);
+    if (!previewId) showMap(liveMap, liveImages, liveMeta);
     else renderTabbar();
   }
 
@@ -511,7 +685,7 @@
       .then(data => {
         if (!data) return;
         if (Array.isArray(data.tabs)) tabs = data.tabs;
-        setMap(data.map, data.images || {});
+        setMap(data.map, data.images || {}, data.meta);
       })
       .catch(() => {})
       .finally(() => { resyncing = false; });
@@ -522,7 +696,7 @@
     if (!next) { resync(); return; }
     liveImages = mergeImages(liveImages, extra ? { tokens: extra.tokens || {} } : null);
     liveMap = next;
-    if (!previewId) showMap(liveMap, liveImages);
+    if (!previewId) { pendingMoves = patch.move || null; showMap(liveMap, liveImages); }
   }
 
   // ── Tabs ─────────────────────────────────────────────────────────────────
@@ -536,7 +710,7 @@
         if (!data || !data.map) return;
         previewId = data.map.id;
         hideInfo();
-        showMap(data.map, data.images || {});
+        showMap(data.map, data.images || {}, data.meta);
       })
       .catch(() => {});
   }
@@ -544,7 +718,7 @@
   function backToLive() {
     previewId = null;
     hideInfo();
-    showMap(liveMap, liveImages);
+    showMap(liveMap, liveImages, liveMeta);
   }
 
   /* Tabs to show: the server's list plus the live map if missing. Pure: tested in node. */
@@ -567,14 +741,14 @@
       b.type = 'button';
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', active ? 'true' : 'false');
-      b.title = isLive ? 'The map the DM has on screen' : 'Look at this map (the DM stays on the live one)';
+      b.title = isLive ? 'Die Karte, die der Spielleiter gerade zeigt' : 'Diese Karte ansehen (der Spielleiter bleibt auf der aktuellen)';
       b.addEventListener('click', () => viewTab(tb.id));
       tabbar.appendChild(b);
     }
     if (previewId) {
       const live = el('button', 'grid-tab grid-tab-back', '● Live');
       live.type = 'button';
-      live.title = 'Back to the map the DM has on screen';
+      live.title = 'Zurück zur Karte, die der Spielleiter zeigt';
       live.addEventListener('click', backToLive);
       tabbar.appendChild(live);
     }
@@ -651,6 +825,10 @@
     _setPreview: id => { previewId = id || null; },
     _infoLines: infoLines,
     _hpFor: hpFor,
+    _scaleText: scaleText,
+    _meta: () => meta,
+    _pendingMoves: () => pendingMoves,
+    _rendererState: () => rendererState,
   };
   window.GridView = api;
 
@@ -672,7 +850,7 @@
         if (previewId && !tabs.some(tb => tb.id === previewId)) backToLive();
         else renderTabbar();
       }
-      if ('map' in payload) setMap(payload.map, payload.map_images || {});
+      if ('map' in payload) setMap(payload.map, payload.map_images || {}, payload.map_meta);
       if (payload.map_patch) onPatch(payload.map_patch, payload.map_images);
       if (payload.stats) onTurn(payload.stats);
       if (payload.assets_changed && map) resync();
