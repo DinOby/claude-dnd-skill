@@ -79,7 +79,8 @@ LEGEND = ("black = thick stone walls; dark red-brown blocks = solid buildings, p
           "light grey with stripes = stairs; blue = water (darker = deeper); brown = wooden floor; "
           "grey = stone floor or flagstones; green = grass; orange and brown blocks = furniture "
           "(tables, chairs, benches, beds, chests, barrels, crates, shelves); dark green circles = trees; "
-          "light grey round = rocks or pillars; dark red = a rug or carpet; light brown planks = a bridge; "
+          "light grey round = rocks or pillars; dark red = a rug or carpet; light brown planks = a bridge or a "
+          "walkway you can walk on (never a fence or wall); "
           "dark diagonal hatching = rough ground, rubble or debris (walkable); grey ring with blue centre = a well; "
           "purple = a chasm; white margin outside the map = continue the surroundings naturally")
 

@@ -335,7 +335,7 @@ def _floor(raw: dict, out: dict) -> str:
     if isinstance(floor, str) and floor.strip().lower() in FLOOR_TYPES:
         return floor.strip().lower()
     hints = " ".join(out.get("tags", []) + [out.get("template", ""), out["id"]]).lower()
-    for words, kind in ((("forest", "wald", "clearing", "camp", "road", "pass", "field", "wiese", "see"), "grass"),
+    for words, kind in ((("forest", "wald", "clearing", "camp", "road", "pass", "field", "wiese"), "grass"),
                         (("tavern", "inn", "schank", "krug", "taverne"), "wood"),
                         (("cave", "grotte", "mine", "stollen", "hoehle"), "earth"),
                         (("market", "markt", "street", "square", "platz", "hof"), "cobble")):
