@@ -47,3 +47,8 @@ venv/
 *.key
 .env
 .env.*
+
+# Claude Code: personal local settings and permissions stay on this machine
+# (also ignored globally — this line protects clones without that setting)
+.claude/settings.local.json
+**/.claude/settings.local.json
