@@ -2643,13 +2643,58 @@ def _map_style() -> dict:
     return dict(styles.get(active) or {}, id=active)
 
 
+# Painted maps (Phase 1): one finished picture per place, painted in the
+# background from the logic map's sketch and checked against it (battlemap.py).
+# Until it exists, or when it failed its check, the tile drawing is shown.
+import battlemap as _battlemap
+_painter_active = False          # set by the real server only (tests never paint)
+
+
+def _painted_done(map_id: str, meta: dict) -> None:
+    cur = _maps.current()
+    if meta.get("ok"):
+        print(f"battlemap: {map_id} painted ({meta.get('attempts')} attempt(s), {meta.get('cost_eur')} EUR)", flush=True)
+    else:
+        print(f"battlemap: {map_id} NOT painted - {meta.get('reason')}; tiles stay", file=sys.stderr, flush=True)
+    if cur and cur["id"] == map_id:
+        _broadcast_main(_map_message(cur))
+
+
+def _painter_enabled() -> bool:
+    try:
+        return bool(_painter_active and _auto_images is not None and _auto_settings().get("enabled"))
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+_painter = _battlemap.Painter(_painted_done, _painter_enabled)
+
+
+def _painted(m: "Optional[dict]") -> dict:
+    """{"url", "status": ok|pending|failed|off, "reason"} for the map's painted picture."""
+    if not m or m.get("temporary"):
+        return {"url": None, "status": "off"}
+    try:
+        url, meta = _battlemap.current(m)
+    except Exception as e:                              # noqa: BLE001 - the tiles always work
+        return {"url": None, "status": "off", "reason": str(e)}
+    if url:
+        return {"url": url, "status": "ok"}
+    if meta and not meta.get("ok"):
+        return {"url": None, "status": "failed", "reason": meta.get("reason", "")}
+    queued = _painter.request(m)
+    return {"url": None, "status": "pending" if queued or _painter_enabled() else "off"}
+
+
 def _map_meta(m: "Optional[dict]") -> dict:
     """What the browser needs to draw a map besides the map itself: the squares a
-    figure cannot enter (for the reach overlay) and the active style (Phase 1)."""
+    figure cannot enter (for the reach overlay), the active style and the painted
+    picture of the place (Phase 1)."""
     if not m:
         return {}
     import map_v2 as _mv2
-    return {"blocked": sorted([x, y] for x, y in _mv2.blockers(m)), "style": _map_style()}
+    return {"blocked": sorted([x, y] for x, y in _mv2.blockers(m)), "style": _map_style(),
+            "painted": _painted(m)}
 
 
 def _map_message(m: "Optional[dict]") -> dict:
@@ -2859,6 +2904,10 @@ def map_post():
         return jsonify({"errors": [f"could not save the map: {e}"]}), 500
     warnings = [w for t in m["tokens"] for w in _grid_map.token_warnings(m, t)]
     warnings += list(_maps.last_moved)
+    painted = _painted(m)
+    if painted.get("status") == "failed":
+        warnings.append(f"painted map for '{m['id']}' did not match the layout ({painted.get('reason')}) — "
+                        f"the tile drawing is shown; `python3 display/battlemap.py paint {m['id']} --force` tries again")
     _broadcast_main(_map_message(m))
     if _maps.last_moved:
         _broadcast_main({"map_tabs": _maps.tabs()})
@@ -3835,6 +3884,7 @@ _sheet_watcher = _sheet_watch.SheetWatcher(_sheet_campaign_dir, _apply_sheet_upd
 
 if __name__ == "__main__":
     _sheet_watcher.start()
+    _painter_active = True
     # Wire audio SFX broadcast now that _broadcast is defined
     if _audio:
         _audio.set_broadcast(_broadcast)

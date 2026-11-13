@@ -217,6 +217,9 @@
       const lines = [];
       if (target.label) lines.push(t[0]);
       if (t[1]) lines.push(t[1]);
+      const COVER = { half: 'halbe Deckung', 'three-quarters': 'Dreivierteldeckung', full: 'volle Deckung' };
+      if (target.blocks === false) lines.push('Hier darf man stehen.');
+      if (COVER[target.cover]) lines.push('Gibt ' + COVER[target.cover] + '.');
       return { title: target.label || t[0], lines: lines };
     }
     const tok = target.tok || {};
@@ -408,7 +411,7 @@
     const C = () => new PIXI.Container();
     this.root = C();
     this.layers = { ground: C(), terrain: C(), shadow: C(), walls: C(), objects: C(), grid: C(),
-                    range: C(), trail: C(), tokens: C(), labels: C() };
+                    range: C(), trail: C(), tokens: C(), labels: C(), names: C() };
     for (const k of Object.keys(this.layers)) this.root.addChild(this.layers[k]);
     this.app.stage.addChild(this.root);
     this.textures = {};
@@ -508,6 +511,14 @@
       this.layers[k].removeChildren().forEach(c => c.destroy({ children: true }));
     }
     const W = m.cols * cs, H = m.rows * cs;
+    this._coords();
+    if (this.painted) {          // one painted picture of the whole place (battlemap.py)
+      const sp = PIXI.Sprite.from(this.painted);
+      sp.width = W; sp.height = H;
+      this.layers.ground.addChild(sp);
+      for (const r of L.objects || []) this._object(r, true);
+      return;
+    }
     const floor = new PIXI.TilingSprite(this._texture(m.floor || 'stone'), W, H);
     const ft = floor.texture, fw = ft.baseTexture && ft.baseTexture.valid ? ft.width : 128;
     floor.tileScale.set((cs * 2) / (fw || 128));
@@ -584,12 +595,23 @@
     }
     bg.lineStyle(0);
     this.layers.walls.addChild(bg);
-    for (const r of L.objects || []) this._object(r);
+    for (const r of L.objects || []) this._object(r, false);
+  };
+
+  /* Grid lines: almost invisible on a painted map unless asked for (the "Raster" button). */
+  MapRenderer.prototype._grid = function (on) {
+    const m = this.map, cs = this.cell, W = m.cols * cs, H = m.rows * cs;
+    this.layers.grid.removeChildren().forEach(c => c.destroy());
+    const alpha = on ? 0.42 : (this.painted ? 0.05 : ((this.style && this.style.grid_alpha) || 0.16));
     const grid = new PIXI.Graphics();
-    grid.lineStyle(1, 0x000000, (this.style && this.style.grid_alpha) || 0.16);
+    grid.lineStyle(on ? 1.5 : 1, on ? 0xf6eed8 : 0x000000, alpha);
     for (let x = 0; x <= m.cols; x++) { grid.moveTo(x * cs, 0); grid.lineTo(x * cs, H); }
     for (let y = 0; y <= m.rows; y++) { grid.moveTo(0, y * cs); grid.lineTo(W, y * cs); }
     this.layers.grid.addChild(grid);
+  };
+
+  MapRenderer.prototype._coords = function () {
+    const m = this.map, cs = this.cell;
     const st = { fontFamily: 'Segoe UI, Arial, sans-serif', fontSize: Math.max(9, Math.round(this.gutter * 0.42)), fill: '#e8e0cc' };
     for (let x = 0; x < m.cols; x++) {
       const t = new PIXI.Text(colLabel(x), st);
@@ -610,9 +632,17 @@
     obj.on('pointertap', e => this.opts.onTap && this.opts.onTap(target, e.global));
   };
 
-  MapRenderer.prototype._object = function (r) {
+  MapRenderer.prototype._object = function (r, painted) {
     const cs = this.cell, x = r.x * cs, y = r.y * cs, w = (r.w || 1) * cs, h = (r.h || 1) * cs;
     const c = new PIXI.Container();
+    if (painted) {            // the picture shows it; keep the hint and mark ways out at the edge
+      if (r.type === 'exit') c.addChild(this._exitMark(r, x, y, w, h));
+      c.cursor = 'help';
+      c.hitArea = new PIXI.Rectangle(x, y, w, h);
+      this._hover(c, { what: 'object', type: r.type, label: r.label || '', cover: r.cover, blocks: r.blocks });
+      this.layers.objects.addChild(c);
+      return;
+    }
     // a picture made for this place wins, then the style's own picture of the thing
     const url = (this.images && this.images.terrain && this.images.terrain[r.type])
       || (this.style && this.style.sprites && this.style.sprites[r.type]);
@@ -796,24 +826,26 @@
     const kind = KINDS[tok.kind] || KINDS.npc;
     const col = this._pal(kind.key, 0x888888);
     const c = new PIXI.Container();
-    const r = size * 0.4;
+    const r = size * 0.42;
     const turn = new PIXI.Graphics();
     turn.visible = false;
     c.addChild(turn);
-    const shadow = new PIXI.Graphics();
-    shadow.beginFill(0x000000, 0.35); shadow.drawEllipse(size * 0.06, size * 0.1, r, r * 0.9); shadow.endFill();
+    const shadow = new PIXI.Graphics();             // drop shadow to the lower right (light from the upper left)
+    for (let i = 3; i >= 1; i--) { shadow.beginFill(0x000000, 0.13); shadow.drawCircle(size * 0.07, size * 0.09, r + i * 1.5); shadow.endFill(); }
     c.addChild(shadow);
-    const ring = new PIXI.Graphics();
-    ring.beginFill(col); drawShape(ring, kind.shape, r); ring.endFill();
-    c.addChild(ring);
-    const inner = new PIXI.Graphics();
-    inner.beginFill(shade(col, -0.45)); drawShape(inner, kind.shape, r * 0.8); inner.endFill();
-    c.addChild(inner);
+    const frame = new PIXI.Graphics();              // round frame: dark rim, metal ring, colour of the kind inside
+    frame.beginFill(0x15110d); frame.drawCircle(0, 0, r); frame.endFill();
+    frame.beginFill(0xc9a45c); frame.drawCircle(0, 0, r * 0.93); frame.endFill();
+    frame.beginFill(0x7a5a2a); frame.drawCircle(0, 0, r * 0.86); frame.endFill();
+    frame.beginFill(col); frame.drawCircle(0, 0, r * 0.82); frame.endFill();
+    frame.beginFill(shade(col, -0.5)); frame.drawCircle(0, 0, r * 0.74); frame.endFill();
+    c.addChild(frame);
+    const kindShape = 'circle';
     const url = this.images && this.images.tokens && this.images.tokens[tok.id];
     if (url) {
       const sp = PIXI.Sprite.from(url);
-      sp.anchor.set(0.5); sp.width = sp.height = r * 1.7;
-      const mask = new PIXI.Graphics(); mask.beginFill(0xffffff); drawShape(mask, kind.shape, r * 0.8); mask.endFill();
+      sp.anchor.set(0.5); sp.width = sp.height = r * 1.5;
+      const mask = new PIXI.Graphics(); mask.beginFill(0xffffff); mask.drawCircle(0, 0, r * 0.74); mask.endFill();
       sp.mask = mask; c.addChild(mask); c.addChild(sp);
     } else {
       const t = new PIXI.Text(initials(tok.name), { fontFamily: 'Segoe UI, Arial, sans-serif', fontWeight: '700',
@@ -829,16 +861,15 @@
     bt.anchor.set(0.5); bt.x = r * 0.78; bt.y = r * 0.78; c.addChild(bt);
     const nameT = new PIXI.Text(shortName(tok.name), { fontFamily: 'Segoe UI, Arial, sans-serif', fontSize: Math.max(9, Math.round(cs * 0.26)),
                                             fill: '#f6eed8', stroke: '#141110', strokeThickness: 3 });
-    nameT.anchor.set(0.5, 0); nameT.y = r + 2;
-    nameT.visible = cs >= 30;
-    c.addChild(nameT);
-    c.on('pointerover', () => { nameT.visible = cs >= 22; });
-    c.on('pointerout', () => { nameT.visible = cs >= 30 && v.labelled !== false; });
+    nameT.anchor.set(0.5, 0.5);
+    nameT.visible = cs >= 22;
+    this.layers.names.addChild(nameT);           // placed by _placeLabels: never overlapping, never cut off
+
     c.cursor = 'pointer';
     c.hitArea = new PIXI.Circle(0, 0, r * 1.1);
     const target = { what: 'token', tok: tok };
     this._hover(c, target);
-    const v = { c: c, turn: turn, target: target, r: r, shape: kind.shape, size: size, tok: tok, nameT: nameT };
+    const v = { c: c, turn: turn, target: target, r: r, shape: kindShape, size: size, tok: tok, nameT: nameT };
     return v;
   };
 
@@ -855,7 +886,7 @@
       seen.add(tok.id);
       let v = this.tokens.get(tok.id);
       const sig = [tok.name, tok.kind, tok.size, this.images && this.images.tokens && this.images.tokens[tok.id], this.cell].join('|');
-      if (v && v.sig !== sig) { v.c.destroy({ children: true }); this.tokens.delete(tok.id); v = null; }
+      if (v && v.sig !== sig) { v.nameT.destroy(); v.c.destroy({ children: true }); this.tokens.delete(tok.id); v = null; }
       const [tx, ty] = this._centre(tok, tok.x, tok.y);
       if (!v) {
         v = this._tokenView(tok);
@@ -877,6 +908,7 @@
     for (const [id, v] of this.tokens) {
       if (seen.has(id)) continue;
       this.tokens.delete(id);
+      v.nameT.destroy();
       this.anims.push({ kind: 'fade', obj: v.c, from: v.c.alpha, to: 0, t: 0, dur: 300, destroy: true });
     }
   };
@@ -928,11 +960,7 @@
 
   MapRenderer.prototype._marks = function (turnName, rangeOn, players) {
     const low = String(turnName || '').toLowerCase();
-    const named = labelled(this.map.tokens || [], turnName);
-    for (const [id, v] of this.tokens) {
-      v.labelled = named.has(id);
-      v.nameT.visible = this.cell >= 30 && v.labelled;
-    }
+    this._placeLabels(low);
     let active = null;
     for (const v of this.tokens.values()) {
       const on = !!low && String(v.tok.name).toLowerCase() === low;
@@ -941,12 +969,19 @@
       if (!on) continue;
       active = v;
       const col = this._pal('turn', 0xf2c14e);
-      v.turn.lineStyle(Math.max(3, this.cell * 0.1), col, 1);
-      drawShape(v.turn, v.shape, v.r * 1.3);
-      v.turn.lineStyle(0);
+      for (let i = 5; i >= 1; i--) {                     // light glow under the figure
+        v.turn.beginFill(col, 0.07 * (6 - i)); v.turn.drawCircle(0, 0, v.r * (1 + i * 0.12)); v.turn.endFill();
+      }
+      v.turn.lineStyle(Math.max(3, this.cell * 0.09), col, 1);
+      v.turn.drawCircle(0, 0, v.r * 1.08);
+      v.turn.lineStyle(Math.max(2, this.cell * 0.04), 0x2a1c08, 1);   // arrow above, with a dark edge
       v.turn.beginFill(col);
-      v.turn.drawPolygon([-v.r * 0.38, -v.r * 1.85, v.r * 0.38, -v.r * 1.85, 0, -v.r * 1.42]);
+      const a = v.r * 1.3;
+      v.turn.beginFill(col, 0.25); v.turn.drawCircle(0, -a - v.r * 0.45, v.r * 0.75); v.turn.endFill();   // glow behind it
+      v.turn.beginFill(col);
+      v.turn.drawPolygon([-v.r * 0.6, -a - v.r * 0.8, v.r * 0.6, -a - v.r * 0.8, 0, -a]);
       v.turn.endFill();
+      v.turn.lineStyle(0);
       this.layers.tokens.addChild(v.c);          // the active figure on top
     }
     const rg = this.layers.range;
@@ -965,7 +1000,46 @@
     rg.addChild(g);
   };
 
-  /* Draw or update. state: {cell, gutter, images, style, blocked, turn, players, moves, range} */
+  /* Name labels: every named figure gets one. Tried below, above, right, left of the
+     figure; the first spot that stays inside the map and touches no other label or
+     figure wins (else below, nudged inside the map). */
+  MapRenderer.prototype._placeLabels = function (turnLow) {
+    const W = this.map.cols * this.cell, H = this.map.rows * this.cell;
+    const views = [...this.tokens.values()].filter(v => v.nameT && !v.c.destroyed);
+    const prio = v => (v.tok.kind === 'pc' ? 0 : String(v.tok.name).toLowerCase() === turnLow ? 1 : 2);
+    views.sort((a, b) => prio(a) - prio(b));
+    const discs = views.map(v => { const [x, y] = this._centre(v.tok, v.tok.x, v.tok.y); return { x: x, y: y, r: v.r }; });
+    const placed = [];
+    views.forEach((v, i) => {            // keep the turn arrow above the active figure free
+      if (String(v.tok.name).toLowerCase() !== turnLow) return;
+      const d = discs[i];
+      placed.push({ x0: d.x - d.r * 0.8, x1: d.x + d.r * 0.8, y0: d.y - d.r * 2.6, y1: d.y - d.r * 0.9 });
+    });
+    const hitsDisc = (b, own) => discs.some((d, i) => i !== own && b.x0 < d.x + d.r && b.x1 > d.x - d.r && b.y0 < d.y + d.r && b.y1 > d.y - d.r);
+    const hitsLabel = b => placed.some(o => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
+    views.forEach((v, i) => {
+      const t = v.nameT, d = discs[i];
+      const w = t.width + 4, h = t.height + 2;
+      const spots = [[d.x, d.y + d.r + h / 2 + 1], [d.x, d.y - d.r - h / 2 - 1],
+                     [d.x + d.r + w / 2 + 2, d.y], [d.x - d.r - w / 2 - 2, d.y]];
+      let best = null;
+      for (const [cx, cy] of spots) {
+        const b = { x0: cx - w / 2, x1: cx + w / 2, y0: cy - h / 2, y1: cy + h / 2 };
+        if (b.x0 < 0 || b.y0 < 0 || b.x1 > W || b.y1 > H) continue;
+        if (hitsLabel(b) || hitsDisc(b, i)) continue;
+        best = [cx, cy, b]; break;
+      }
+      if (!best) {
+        const cx = Math.max(w / 2, Math.min(W - w / 2, d.x));
+        const cy = d.y + d.r + h / 2 + 1 > H ? d.y - d.r - h / 2 - 1 : d.y + d.r + h / 2 + 1;
+        best = [cx, cy, { x0: cx - w / 2, x1: cx + w / 2, y0: cy - h / 2, y1: cy + h / 2 }];
+      }
+      t.x = best[0]; t.y = best[1];
+      placed.push(best[2]);
+    });
+  };
+
+  /* Draw or update. state: {cell, gutter, images, style, blocked, turn, players, moves, range, painted, grid} */
   MapRenderer.prototype.render = function (map, state) {
     this.map = map;
     this.images = state.images || {};
@@ -973,14 +1047,16 @@
     this.cell = state.cell;
     this.gutter = state.gutter;
     this.blocked = new Set((state.blocked || []).map(c => key(c[0], c[1])));
+    this.painted = state.painted || null;
     const W = this.gutter + map.cols * this.cell, H = this.gutter + map.rows * this.cell;
     if (this.app.screen.width !== W || this.app.screen.height !== H) this.app.renderer.resize(W, H);
     this.root.x = this.gutter; this.root.y = this.gutter;
     const sk = [map.id, map.cols, map.rows, map.floor, JSON.stringify(map.layers || {}), this.cell, this.gutter,
-                JSON.stringify(this.images.terrain || {}), this.style.id || '', JSON.stringify(this.style.palette || {})].join('|');
+                JSON.stringify(this.images.terrain || {}), this.style.id || '', JSON.stringify(this.style.palette || {}),
+                this.painted || ''].join('|');
     if (sk !== this.staticKey) {
       if (!this.staticKey || this.staticKey.split('|')[0] !== map.id) {
-        for (const v of this.tokens.values()) v.c.destroy({ children: true });
+        for (const v of this.tokens.values()) { v.nameT.destroy(); v.c.destroy({ children: true }); }
         this.tokens.clear();
         this.layers.trail.removeChildren();
         this.anims = [];
@@ -988,6 +1064,7 @@
       this.staticKey = sk;
       this._buildStatic();
     }
+    this._grid(!!state.grid);
     this._syncTokens(state.moves);
     this._marks(state.turn, state.range, state.players);
   };

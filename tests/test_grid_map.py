@@ -131,8 +131,10 @@ class PatchTests(unittest.TestCase):
         self.assertIn("Nearest free square: B2", err.exception.problems[0])
         with self.assertRaises(gm.MapError):          # force never puts a figure into a wall
             gm.apply_patch(self.m, {"move": [{"id": "flerb", "to": "B1", "force": True}]})
-        _, _, warnings = gm.apply_patch(self.m, {"move": [{"id": "goblin-2", "to": "J6"}]})
-        self.assertEqual(warnings, ["Goblin shares J6 with Goblin"])
+        # one figure per square (Phase 1): sharing is refused with the nearest free square
+        with self.assertRaises(gm.MapError) as err:
+            gm.apply_patch(self.m, {"move": [{"id": "goblin-2", "to": "J6"}]})
+        self.assertIn("J6 is taken by Goblin", err.exception.problems[0])
         with self.assertRaises(gm.MapError):
             gm.apply_patch(self.m, {"map_id": "elsewhere", "move": [{"id": "flerb", "to": "B2"}]})
         with self.assertRaises(gm.MapError):

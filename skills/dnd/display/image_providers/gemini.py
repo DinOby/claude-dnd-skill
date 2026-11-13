@@ -114,6 +114,18 @@ class GeminiProvider:
     # ── Requests ──
     def _body(self, req: ImageRequest) -> "tuple[str, dict]":
         ratio = aspect_ratio(req.width, req.height)
+        if req.reference:
+            # text + picture in: always the documented generateContent shape
+            image_cfg = {"aspectRatio": ratio}
+            if self.image_size:
+                image_cfg["imageSize"] = self.image_size
+            return (f"{self.base_url}/models/{self.model}:generateContent", {
+                "contents": [{"parts": [
+                    {"text": req.prompt},
+                    {"inline_data": {"mime_type": req.reference_mime,
+                                     "data": base64.b64encode(req.reference).decode("ascii")}}]}],
+                "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": image_cfg},
+            })
         if self.api == "generate_content":
             image_cfg = {"aspectRatio": ratio}
             if self.image_size:
@@ -157,7 +169,7 @@ class GeminiProvider:
         except ProviderError as e:
             # The interactions docs show response_format both as an object and
             # as a list; if the API rejects our shape, try the other one once.
-            if (self.api == "interactions" and "HTTP 400" in str(e)
+            if (self.api == "interactions" and not req.reference and "HTTP 400" in str(e)
                     and "response_format" in str(e)):
                 self._format_as_list = not self._format_as_list
                 url, body = self._body(req)

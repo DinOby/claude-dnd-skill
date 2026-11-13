@@ -61,9 +61,9 @@
   let renderer = null;
   let rendererState = 'none';                     // none | loading | ready | failed
   let pendingMoves = null;                        // moves of the last patch, with walking paths
-  let rangeOn = false, legendOpen = false;
+  let rangeOn = false, legendOpen = false, gridOn = false;
   let tools = null, legend = null, tip = null;
-  const RANGE_KEY = 'dnd-map-range', LEGEND_KEY = 'dnd-map-legend';
+  const RANGE_KEY = 'dnd-map-range', LEGEND_KEY = 'dnd-map-legend', GRID_KEY = 'dnd-map-grid';
   const listeners = [];
 
   // ── Pure helpers (exported for tests) ────────────────────────────────────
@@ -256,7 +256,7 @@
     legend.className = 'grid-legend';
     legend.hidden = true;
     panel.appendChild(legend);
-    try { rangeOn = localStorage.getItem(RANGE_KEY) === '1'; legendOpen = localStorage.getItem(LEGEND_KEY) === '1'; } catch (_) {}
+    try { rangeOn = localStorage.getItem(RANGE_KEY) === '1'; legendOpen = localStorage.getItem(LEGEND_KEY) === '1'; gridOn = localStorage.getItem(GRID_KEY) === '1'; } catch (_) {}
     document.body.appendChild(panel);
     window.addEventListener('resize', () => { hideInfo(); render(); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') hideInfo(); });
@@ -532,7 +532,8 @@
       if (!renderer) renderer = new window.MapRenderer(board, { onHover: showTip, onLeave: hideTip, onTap: tapTarget });
       renderer.render(map, { cell: cell, gutter: gutter, images: images, style: meta.style || {},
                              blocked: meta.blocked || [], turn: turn, players: players,
-                             moves: pendingMoves, range: rangeOn });
+                             moves: pendingMoves, range: rangeOn, grid: gridOn,
+                             painted: (meta.painted && meta.painted.url) || null });
       pendingMoves = null;
       return true;
     } catch (err) {
@@ -604,6 +605,18 @@
         render();
       });
       tools.appendChild(rb);
+    }
+    if (rendererState !== 'failed' && !forceDom()) {
+      const gb = el('button', 'grid-tool' + (gridOn ? ' on' : ''), 'Raster');
+      gb.type = 'button';
+      gb.setAttribute('aria-pressed', gridOn ? 'true' : 'false');
+      gb.title = 'Blendet die Felder deutlich ein (sonst nur ganz leicht)';
+      gb.addEventListener('click', () => {
+        gridOn = !gridOn;
+        try { localStorage.setItem(GRID_KEY, gridOn ? '1' : '0'); } catch (_) {}
+        render();
+      });
+      tools.appendChild(gb);
     }
     const lb = el('button', 'grid-tool' + (legendOpen ? ' on' : ''), legendOpen ? 'Legende ▾' : 'Legende ▸');
     lb.type = 'button';

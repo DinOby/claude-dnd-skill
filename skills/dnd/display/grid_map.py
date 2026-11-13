@@ -178,6 +178,13 @@ def _norm_terrain(raw, cols: int, rows: int, problems: "list[str]") -> "list[dic
         rect = {"x": pos[0], "y": pos[1], "w": w, "h": h, "type": t["type"].strip()}
         if isinstance(t.get("label"), str) and t["label"].strip():
             rect["label"] = t["label"].strip()
+        if isinstance(t.get("blocks"), bool):                  # furniture override (Phase 1)
+            rect["blocks"] = t["blocks"]
+        if "cover" in t:
+            if t["cover"] in map_v2.COVER:
+                rect["cover"] = t["cover"]
+            else:
+                problems.append(f"{where}: cover should be one of {', '.join(map_v2.COVER)}")
         _check_rect(rect, cols, rows, where, problems)
         out.append(rect)
     return out
@@ -367,6 +374,18 @@ def placement_problem(m: dict, tok: dict, x: int, y: int, blocked: "Optional[dic
     blocked = map_v2.blockers(m) if blocked is None else blocked
     hits = [(c, blocked[c]) for c in sorted(_cells(x, y, tok["size"])) if c in blocked]
     if not hits:
+        # one figure per square (objects and hidden tokens do not count)
+        mine = _cells(x, y, tok["size"])
+        for other in m["tokens"]:
+            if (other is tok or other.get("id") == tok.get("id") or other.get("x") is None
+                    or other.get("kind") == "object" or other.get("hidden")):
+                continue
+            if mine & _cells(other["x"], other["y"], other["size"]):
+                taken = {c for t2 in m["tokens"] if t2 is not tok and t2.get("x") is not None
+                         and t2.get("kind") != "object" for c in _cells(t2["x"], t2["y"], t2["size"])}
+                free = map_v2.nearest_free(m, x, y, tok["size"], taken, blocked)
+                hint = f" Nearest free square: {format_coord(*free)}." if free else ""
+                return (f"{format_coord(x, y)} is taken by {other['name']} — one figure per square.{hint}")
         return None
     if force and all(layer == "objects" for _, (layer, _kind) in hits):
         return None

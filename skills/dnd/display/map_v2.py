@@ -54,6 +54,37 @@ SPANNING_OBJECTS = ("bridge", "ford", "plank")
 # Objects that mark a way in or out of the place (shown with a marker).
 EXIT_OBJECTS = ("exit", "door", "stairs", "ladder", "trapdoor", "gate")
 
+# Furniture and fittings: does it block the square, and what cover does it give?
+# A single object in a layout may override both: {"type": "table", "blocks": false,
+# "cover": "half"} (a low table you can climb on). Cover: none | half | three-quarters | full.
+COVER = ("none", "half", "three-quarters", "full")
+OBJECT_PROPS = {
+    "table": (True, "half"), "chair": (True, "none"), "stool": (True, "none"), "bench": (True, "half"),
+    "bed": (True, "half"), "bar": (True, "half"), "counter": (True, "half"), "shelf": (True, "three-quarters"),
+    "cupboard": (True, "three-quarters"), "wardrobe": (True, "three-quarters"), "chest": (True, "half"),
+    "barrel": (True, "half"), "crate": (True, "half"), "sack": (True, "none"), "plant": (True, "none"),
+    "pot": (True, "none"), "tree": (True, "three-quarters"), "bush": (True, "half"), "rock": (True, "half"),
+    "pillar": (True, "three-quarters"), "statue": (True, "three-quarters"), "altar": (True, "half"),
+    "shrine": (True, "half"), "well": (True, "half"), "fireplace": (True, "half"), "fire": (True, "none"),
+    "stall": (True, "half"), "tent": (True, "full"), "wagon": (True, "three-quarters"), "log": (True, "half"),
+    "anvil": (True, "half"), "forge": (True, "half"), "cage": (True, "half"), "throne": (True, "half"),
+    "door": (False, "none"), "gate": (False, "none"), "stairs": (False, "none"), "ladder": (False, "none"),
+    "trapdoor": (False, "none"), "exit": (False, "none"), "bridge": (False, "none"), "ford": (False, "none"),
+    "plank": (False, "none"), "rug": (False, "none"), "carpet": (False, "none"),
+}
+
+
+def object_props(obj: dict) -> "tuple[bool, str]":
+    """(blocks, cover) of a layout object: its own override, else the type's default
+    (an unknown thing blocks and gives half cover)."""
+    blocks, cover = OBJECT_PROPS.get(obj.get("type"), (True, "half"))
+    if isinstance(obj.get("blocks"), bool):
+        blocks = obj["blocks"]
+    if obj.get("cover") in COVER:
+        cover = obj["cover"]
+    return blocks, cover
+
+
 MAX_PATH_POINTS = 64
 MAX_PATH_WIDTH = 4
 
@@ -229,7 +260,7 @@ def blockers(m: dict) -> dict:
                 if c not in span:
                     out[c] = ("terrain", kind)
     for r in layers.get("objects") or []:
-        if r["type"] not in WALKABLE_OBJECTS:
+        if object_props(r)[0]:
             for c in _rect_cells(r):
                 out[c] = ("objects", r["type"])
     for r in layers.get("walls") or []:
@@ -245,7 +276,10 @@ GERMAN = {
     "rock": "Felsen", "pillar": "Säule", "well": "Brunnen", "bar": "Theke", "fireplace": "Kamin",
     "fire": "Feuer", "stall": "Marktstand", "tent": "Zelt", "wagon": "Wagen", "log": "Baumstamm",
     "chest": "Truhe", "altar": "Altar", "statue": "Statue", "shrine": "Schrein", "barrel": "Fass",
-    "crate": "Kiste", "bush": "Busch",
+    "crate": "Kiste", "bush": "Busch", "bench": "Bank", "stool": "Hocker", "shelf": "Regal",
+    "cupboard": "Schrank", "wardrobe": "Kleiderschrank", "counter": "Tresen", "sack": "Sack",
+    "plant": "Pflanze", "pot": "Topf", "anvil": "Amboss", "forge": "Esse", "cage": "Käfig",
+    "throne": "Thron",
 }
 
 

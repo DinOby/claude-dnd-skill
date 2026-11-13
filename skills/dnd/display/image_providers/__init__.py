@@ -32,6 +32,8 @@ class ImageRequest:
     negative_prompt: str = ""
     seed: Optional[int] = None
     transparent: bool = False      # a wish, not a guarantee — providers may ignore it
+    reference: Optional[bytes] = None   # an input picture to paint from (e.g. a map sketch)
+    reference_mime: str = "image/png"
 
 
 @dataclass
