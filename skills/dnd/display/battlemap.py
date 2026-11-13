@@ -248,11 +248,23 @@ def inventory(m: dict) -> str:
         a = format_coord(r["x"], r["y"])
         b = format_coord(r["x"] + r.get("w", 1) - 1, r["y"] + r.get("h", 1) - 1)
         groups.setdefault(r["type"], []).append(a if a == b else f"{a}-{b}")
+    areas: dict = {}
+    L = m.get("layers") or {}
+    for name in ("terrain", "walls"):
+        for r in L.get(name) or []:
+            a = format_coord(r["x"], r["y"])
+            b = format_coord(r["x"] + r.get("w", 1) - 1, r["y"] + r.get("h", 1) - 1)
+            kind = "building" if name == "walls" and is_building(r) else r["type"]
+            areas.setdefault(kind, []).append(a if a == b else f"{a}-{b}")
+    area_text = ""
+    if areas:
+        area_text = ("Exact extent of the large areas, square for square (keep their size, do not shrink "
+                     "or widen them): " + "; ".join(f"{k} ({', '.join(v)})" for k, v in sorted(areas.items())) + ". ")
     if not groups:
-        return "There is no furniture: leave the floor free of objects."
+        return area_text + "There is no furniture: leave the floor free of objects."
     parts = [f"{kind} ({', '.join(where)})" for kind, where in sorted(groups.items())]
     return ("The squares are numbered like a chessboard: columns A, B, C ... from the left, rows 1, 2, 3 ... "
-            "from the top. Paint exactly these objects on exactly these squares and nothing else: "
+            "from the top. " + area_text + "Paint exactly these objects on exactly these squares and nothing else: "
             + "; ".join(parts) + ". Every other floor square stays empty floor (no extra furniture, "
             "no extra benches, rugs or crates).")
 
