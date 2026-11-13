@@ -439,7 +439,10 @@ def paint(m: dict, provider=None, budget=None, force: bool = False, root: Option
         from image_providers import load_provider
         from asset_pipeline import provider_config
         from gemini_budget import Budget
-        provider = provider or load_provider("gemini", provider_config().get())
+        pcfg = provider_config().get()
+        if pm.get("model"):                     # painted maps use their own (stronger) model
+            pcfg.setdefault("providers", {}).setdefault("gemini", {})["model"] = pm["model"]
+        provider = provider or load_provider("gemini", pcfg)
         budget = budget or Budget()
     ok_av, why = provider.available()
     if not ok_av:
@@ -451,7 +454,8 @@ def paint(m: dict, provider=None, budget=None, force: bool = False, root: Option
     cost = budget.image_cost(getattr(provider, "model", None)) if getattr(provider, "paid", False) else 0.0
     from image_providers import ImageRequest
     spent, best, tries = 0.0, None, 0
-    meta = {"map_id": m["id"], "hash": h, "style": cfg.get("active", "neutral"), "ok": False}
+    meta = {"map_id": m["id"], "hash": h, "style": cfg.get("active", "neutral"), "ok": False,
+            "model": getattr(provider, "model", None)}
     for attempt in range(1, attempts + 1):
         if max_eur is not None and spent + cost > max_eur + 1e-9:
             meta["reason"] = f"stopped at the cost limit of {max_eur:.2f} EUR"

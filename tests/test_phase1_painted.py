@@ -155,6 +155,27 @@ class PaintTests(unittest.TestCase):
             self.assertFalse(meta["ok"])
 
 
+class ModelTests(unittest.TestCase):
+    def test_painted_maps_use_the_model_from_the_style_file(self):
+        from unittest import mock
+        seen = {}
+
+        class Prov:
+            paid, model = True, "x"
+            def available(self): return False, "test stops here"
+
+        def fake_load(name, cfg):
+            seen["model"] = cfg["providers"]["gemini"]["model"]
+            return Prov()
+
+        with mock.patch("image_providers.load_provider", fake_load), tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(RuntimeError):
+                bm.paint(tavern(), root=d, log=lambda *_: None)
+        want = bm._style_cfg()["painted_map"]["model"]
+        self.assertEqual(seen["model"], want)
+        self.assertEqual(want, "gemini-3.1-flash-image")
+
+
 class ServerTests(unittest.TestCase):
     def test_tests_never_start_the_painter(self):
         from tests.app_isolation import import_app
