@@ -613,7 +613,9 @@
   MapRenderer.prototype._object = function (r) {
     const cs = this.cell, x = r.x * cs, y = r.y * cs, w = (r.w || 1) * cs, h = (r.h || 1) * cs;
     const c = new PIXI.Container();
-    const url = this.images && this.images.terrain && this.images.terrain[r.type];
+    // a picture made for this place wins, then the style's own picture of the thing
+    const url = (this.images && this.images.terrain && this.images.terrain[r.type])
+      || (this.style && this.style.sprites && this.style.sprites[r.type]);
     if (url && r.type !== 'exit') {
       const sp = PIXI.Sprite.from(url);
       sp.x = x; sp.y = y; sp.width = w; sp.height = h;
