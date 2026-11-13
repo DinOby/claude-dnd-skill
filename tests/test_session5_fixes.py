@@ -4,6 +4,8 @@ A1  An XP award keeps its reason in words (the --note text), next to kind and
     difficulty, in the ledger and the game-state log. New kind: quest.
 A2  The display follows sheet changes (armour class, inventory, features) without
     a restart: game.py sends them, and a sheet watcher catches hand edits.
+A3  A requested roll is rolled on the DM's terms: die, bonus and advantage come
+    from the request, whatever the dialog sends.
 A4  Placeholders such as "keine (Ungerüstete Verteidigung)" are no items.
 """
 from __future__ import annotations
@@ -259,6 +261,66 @@ class AppSheetMergeTests(unittest.TestCase):
 
     def test_the_watcher_is_not_started_on_import(self):
         self.assertIsNone(self.mod._sheet_watcher._thread)
+
+
+class DiceTermsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from tests.app_isolation import import_app
+        cls.mod = import_app("dnd_display_app_s5_dice")
+        cls.mod._token_ok = lambda: True
+        cls.mod._host_ok = lambda: True
+        cls.client = cls.mod.app.test_client()
+
+    def setUp(self):
+        self.mod._dice_pending.clear()
+        self.mod._dice_answered.clear()
+        self.mod._dice_meta.clear()
+
+    def _request(self, **kw):
+        body = {"character": "Alrik", "spec": "1d20", "modifier": 3, "advantage": "normal",
+                "label": "Tierführung"}
+        body.update(kw)
+        r = self.client.post("/dice-request", json=body)
+        self.assertEqual(r.status_code, 200)
+        return r.get_json()["request_id"]
+
+    def _roll(self, **kw):
+        body = {"character": "Alrik", "spec": "1d20", "modifier": 0, "advantage": "normal"}
+        body.update(kw)
+        return self.client.post("/player-input/dice", json=body)
+
+    def test_a_changed_bonus_is_ignored(self):
+        rid = self._request(modifier=3)
+        res = self._roll(request_id=rid, modifier=4).get_json()
+        self.assertEqual(res["modifier"], 3)
+        self.assertEqual(res["total"], res["subtotal"] + 3)
+
+    def test_advantage_cannot_replace_disadvantage(self):
+        rid = self._request(modifier=2, advantage="disadvantage")
+        res = self._roll(request_id=rid, modifier=2, advantage="advantage").get_json()
+        self.assertEqual(res["advantage"], "disadvantage")
+        self.assertEqual(res["kept"][0], min(res["both"]))
+
+    def test_the_die_comes_from_the_request(self):
+        rid = self._request(spec="1d6", modifier=0)
+        res = self._roll(request_id=rid, spec="1d20").get_json()
+        self.assertEqual(res["spec"], "1d6")
+        self.assertLessEqual(res["subtotal"], 6)
+
+    def test_an_unknown_request_is_refused(self):
+        r = self._roll(request_id="abcdef123456", modifier=9)
+        self.assertEqual(r.status_code, 410)
+
+    def test_a_free_roll_keeps_the_players_choice(self):
+        res = self._roll(modifier=5, advantage="advantage").get_json()
+        self.assertEqual((res["modifier"], res["advantage"]), (5, "advantage"))
+
+    def test_the_request_still_completes(self):
+        rid = self._request()
+        self._roll(request_id=rid, modifier=7)
+        status = self.client.get(f"/dice-request/{rid}").get_json()
+        self.assertTrue(status.get("complete"))
 
 
 if __name__ == "__main__":

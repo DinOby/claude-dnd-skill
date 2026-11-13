@@ -139,6 +139,10 @@
     label.maxLength = 60;
     label.placeholder = 'What for? (e.g. Stealth)';
     label.value = req && req.label ? req.label : '';
+    // A requested roll is rolled on the DM's terms (die, bonus, advantage); the
+    // server enforces them too, so the controls are only shown, not changeable.
+    const locked = !!(req && req.request_id);
+    if (locked) label.readOnly = true;
     if (req && req.dc != null) dialog.appendChild(el('div', 'pa-dc', 'DC ' + req.dc));
 
     const dieRow = el('div', 'pa-row');
@@ -147,6 +151,7 @@
     for (const d of DICE) {
       const b = el('button', 'pa-die' + (d === spec ? ' active' : ''), d.replace(/^1d/, 'd'));
       b.type = 'button';
+      if (locked && d !== spec) b.disabled = true;
       b.addEventListener('click', () => { spec = d; dieBtns.forEach(o => o.classList.toggle('active', o === b)); });
       dieBtns.push(b);
       dieRow.appendChild(b);
@@ -158,6 +163,7 @@
     for (const [val, text] of [['normal', 'Normal'], ['advantage', 'Advantage'], ['disadvantage', 'Disadvantage']]) {
       const b = el('button', 'pa-adv' + (val === adv ? ' active' : ''), text);
       b.type = 'button';
+      if (locked && val !== adv) b.disabled = true;
       b.addEventListener('click', () => { adv = val; advBtns.forEach(o => o.classList.toggle('active', o === b)); });
       advBtns.push(b);
       advRow.appendChild(b);
@@ -170,6 +176,7 @@
     mod.min = '-20';
     mod.max = '20';
     mod.value = String(req && req.modifier ? req.modifier : 0);
+    if (locked) mod.readOnly = true;
     modRow.appendChild(mod);
 
     const result = el('div', 'pa-result');
@@ -184,6 +191,12 @@
       if (pendingReq && pendingReq.request_id) body.request_id = pendingReq.request_id;
       fetch('/player-input/dice', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
         .then(r => {
+          if (r.status === 410) {   // the request is gone (display restarted, withdrawn)
+            pendingReq = null;
+            result.textContent = 'This roll request has expired — ask the DM again';
+            setTimeout(closeDialog, 3200);
+            return Promise.reject(null);
+          }
           if (r.status === 409) {   // another device already answered this roll
             pendingReq = null;
             result.textContent = 'Already rolled on another screen';
@@ -207,6 +220,7 @@
     dialog.appendChild(dieRow);
     dialog.appendChild(advRow);
     dialog.appendChild(modRow);
+    if (locked) dialog.appendChild(el('div', 'pa-locked', 'Set by the DM: die, bonus and advantage'));
     dialog.appendChild(roll);
     dialog.appendChild(result);
     roll.focus();

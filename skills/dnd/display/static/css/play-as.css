@@ -130,3 +130,8 @@
 
 :root[data-theme="light"] .pa-dialog,
 :root[data-theme="light"] #pa-fab { background: rgba(250, 243, 226, 0.98); color: #2d2010; }
+
+/* A requested roll: die, bonus and advantage come from the DM (Sitzung 5). */
+.pa-dialog button:disabled { opacity: .35; cursor: not-allowed; }
+.pa-dialog input[readonly] { opacity: .8; cursor: default; }
+.pa-locked { font-size: .8em; opacity: .75; margin: 4px 0 2px; }

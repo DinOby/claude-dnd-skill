@@ -1388,6 +1388,11 @@ _dice_pending_lock = threading.Lock()
 # would otherwise add a second, different result to the DM's turn.
 _dice_answered: dict = {}
 _DICE_ANSWERED_MAX = 200
+# request_id → the DM's terms {spec, modifier, advantage, label, dc} for every
+# request (also "any"). A roll that answers a request is rolled on these terms,
+# whatever the dialog sent (Sitzung 5: a changed bonus and advantage instead of
+# disadvantage reached the DM). Bounded like _dice_answered.
+_dice_meta: dict = {}
 
 
 def _dice_pending_snapshot() -> list:
@@ -2985,6 +2990,12 @@ def player_dice():
         with _dice_pending_lock:
             if character.lower() in _dice_answered.get(req_id, ()):
                 return jsonify({"error": "already rolled", "request_id": req_id}), 409
+            terms = _dice_meta.get(req_id)
+        if terms is None:
+            # unknown or forgotten request: never roll it on the player's terms
+            return jsonify({"error": "request unknown", "request_id": req_id}), 410
+        spec, modifier, adv = terms["spec"], terms["modifier"], terms["advantage"]
+        label = terms.get("label") or label
 
     m = re.fullmatch(r"(\d{1,2})d(\d{1,3})", spec)
     if not m:
@@ -3123,6 +3134,11 @@ def dice_request():
     dc_val   = int(dc) if isinstance(dc, (int, float)) else None
 
     request_id = secrets.token_hex(6)
+    with _dice_pending_lock:
+        _dice_meta[request_id] = {"spec": spec, "modifier": modifier, "advantage": adv,
+                                  "label": label, "dc": dc_val}
+        while len(_dice_meta) > _DICE_ANSWERED_MAX:
+            _dice_meta.pop(next(iter(_dice_meta)))
 
     # Only register pending entries for explicit named targets. "any" is fire-and-forget.
     trackable = [c for c in chars if c.lower() != "any"]
