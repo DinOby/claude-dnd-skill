@@ -464,7 +464,8 @@ def _write(path: str, data: bytes) -> None:
 
 
 def paint(m: dict, provider=None, budget=None, force: bool = False, root: Optional[str] = None,
-          log: Callable[[str], None] = print, max_eur: Optional[float] = None) -> dict:
+          log: Callable[[str], None] = print, max_eur: Optional[float] = None,
+          model: Optional[str] = None) -> dict:
     """Paint one map (sketch -> Gemini -> check, up to max_attempts). Returns the stored meta."""
     cfg = _style_cfg()
     pm = cfg.get("painted_map") or {}
@@ -479,8 +480,8 @@ def paint(m: dict, provider=None, budget=None, force: bool = False, root: Option
         from asset_pipeline import provider_config
         from gemini_budget import Budget
         pcfg = provider_config().get()
-        if pm.get("model"):                     # painted maps use their own (stronger) model
-            pcfg.setdefault("providers", {}).setdefault("gemini", {})["model"] = pm["model"]
+        if model or pm.get("model"):            # painted maps use their own (stronger) model
+            pcfg.setdefault("providers", {}).setdefault("gemini", {})["model"] = model or pm["model"]
         provider = provider or load_provider("gemini", pcfg)
         budget = budget or Budget()
     ok_av, why = provider.available()
@@ -615,6 +616,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("sketch"); s.add_argument("map_id"); s.add_argument("--out", required=True)
     p = sub.add_parser("paint"); p.add_argument("map_id"); p.add_argument("--force", action="store_true")
     p.add_argument("--max-eur", type=float, default=0.25)
+    p.add_argument("--model", help="one-off image model for this painting (default: painted_map.model)")
     st = sub.add_parser("status"); st.add_argument("map_id", nargs="?")
     rc = sub.add_parser("recheck", help="check the turned-down picture again (free)"); rc.add_argument("map_id")
     args = ap.parse_args(argv)
@@ -629,7 +631,7 @@ def main(argv=None) -> int:
         print(f"sketch {args.out} (aspect {ratio}, map box {box})")
         return 0
     if args.cmd == "paint":
-        meta = paint(_load(args.map_id), force=args.force, max_eur=args.max_eur)
+        meta = paint(_load(args.map_id), force=args.force, max_eur=args.max_eur, model=args.model)
         print(json.dumps(meta, ensure_ascii=False, indent=1))
         return 0 if meta.get("ok") else 1
     if args.cmd == "recheck":
