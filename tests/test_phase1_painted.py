@@ -147,6 +147,19 @@ class PaintTests(unittest.TestCase):
             self.assertFalse(stored["ok"])
             self.assertTrue((pathlib.Path(d) / "schenke.rejected.jpg").exists())
 
+    def test_recheck_takes_a_turned_down_picture_that_fits_now(self):
+        prov, budget, calls = self._fake([1, 1, 1])
+        with tempfile.TemporaryDirectory() as d:
+            bm.paint(tavern(), prov, budget, root=d, log=lambda *_: None)
+            meta = bm.recheck(tavern(), root=d)                  # a shifted picture still fails
+            self.assertFalse(meta["ok"])
+            good, box = paint_from_sketch(tavern())
+            good.crop(box).save(pathlib.Path(d) / "schenke.rejected.jpg")
+            meta = bm.recheck(tavern(), root=d)
+            self.assertTrue(meta["ok"])
+            self.assertEqual(len(calls), 3)                      # no new painting
+            self.assertIsNotNone(bm.current(tavern(), root=d)[0])
+
     def test_the_cost_cap_stops_a_run(self):
         prov, budget, calls = self._fake([1, 1, 1])
         with tempfile.TemporaryDirectory() as d:

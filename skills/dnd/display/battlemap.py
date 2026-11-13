@@ -360,8 +360,12 @@ def verify(m: dict, img, limits: Optional[dict] = None) -> dict:
         from grid_map import format_coord
         reasons.append("the layout was shrunk or shifted (margin colour inside the map at "
                        + ", ".join(format_coord(*c) for c in sorted(leak)[:6]) + ")")
-    # furniture must stand out from the floor around it (else it was moved or left out)
-    obj = [c for c, k in kinds.items() if k == "object"]
+    # large furniture (2+ squares: tables, counters, fireplaces) must stand out from the
+    # floor (else it was moved or left out); a single chair on a wooden floor often does not
+    big = {(r["x"] + i, r["y"] + j) for r in (m.get("layers") or {}).get("objects") or []
+           if r.get("w", 1) * r.get("h", 1) >= 2 and map_v2.object_props(r)[0]
+           for i in range(r.get("w", 1)) for j in range(r.get("h", 1))}
+    obj = [c for c, k in kinds.items() if k == "object" and c in big]
     if len(obj) >= 4 and groups:
         far = 0
         for c in obj:
@@ -375,7 +379,7 @@ def verify(m: dict, img, limits: Optional[dict] = None) -> dict:
         checks["object"]["visible"] = round(share_obj, 2)
         checks["object"]["ok"] = share_obj >= need
         if share_obj < need:
-            reasons.append(f"furniture: only {share_obj:.0%} of {len(obj)} squares look like furniture")
+            reasons.append(f"large furniture: only {share_obj:.0%} of {len(obj)} squares look like furniture")
     ok = not reasons
     return {"ok": ok, "checks": checks, "reason": "; ".join(reasons) if reasons else ""}
 
@@ -414,6 +418,28 @@ def current(m: dict, root: Optional[str] = None, cfg: Optional[dict] = None) -> 
     if meta.get("ok") and os.path.isfile(img):
         return f"/assets/file/global/battlemaps/{m['id']}.jpg?v={int(os.path.getmtime(img))}", meta
     return None, meta
+
+
+def recheck(m: dict, root: Optional[str] = None) -> dict:
+    """Check the stored, turned-down picture again with the current rules (costs nothing);
+    if it fits now, it becomes the place's painted map."""
+    img_path, meta_path = _paths(m["id"], root)
+    rejected = img_path.replace(".jpg", ".rejected.jpg")
+    meta = read_meta(m["id"], root)
+    if not meta or not os.path.isfile(rejected):
+        raise ValueError(f"no turned-down picture for '{m['id']}'")
+    from PIL import Image
+    cfg = _style_cfg()
+    check = verify(m, Image.open(rejected).convert("RGB"), (cfg.get("painted_map") or {}).get("verify"))
+    meta["checks"] = check["checks"]
+    if check["ok"]:
+        os.replace(rejected, img_path)
+        meta.update(ok=True, rechecked=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        meta.pop("reason", None)
+    else:
+        meta["reason"] = check["reason"]
+    _write(meta_path, json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
+    return meta
 
 
 def _write(path: str, data: bytes) -> None:
@@ -577,6 +603,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("paint"); p.add_argument("map_id"); p.add_argument("--force", action="store_true")
     p.add_argument("--max-eur", type=float, default=0.25)
     st = sub.add_parser("status"); st.add_argument("map_id", nargs="?")
+    rc = sub.add_parser("recheck", help="check the turned-down picture again (free)"); rc.add_argument("map_id")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -591,6 +618,10 @@ def main(argv=None) -> int:
     if args.cmd == "paint":
         meta = paint(_load(args.map_id), force=args.force, max_eur=args.max_eur)
         print(json.dumps(meta, ensure_ascii=False, indent=1))
+        return 0 if meta.get("ok") else 1
+    if args.cmd == "recheck":
+        meta = recheck(_load(args.map_id))
+        print(f"{args.map_id}: {'fits now - shown painted' if meta.get('ok') else 'still does not fit: ' + meta.get('reason', '')}")
         return 0 if meta.get("ok") else 1
     root = _root()
     ids = [args.map_id] if args.map_id else sorted(f[:-5] for f in os.listdir(root) if f.endswith(".json")) \

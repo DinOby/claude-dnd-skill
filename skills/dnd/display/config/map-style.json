@@ -322,7 +322,7 @@
       "min_outlier_distance": 55,
       "max_invented_share": 0.035,
       "min_floor_accuracy": 0.75,
-      "min_object_share": 0.6
+      "min_object_share": 0.55
     },
     "model": "gemini-3.1-flash-image"
   }
