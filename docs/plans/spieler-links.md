@@ -1,6 +1,6 @@
 # Plan: Persönliche Spieler-Links
 
-Stand: 18.10.2026 · Status: **nur Plan, noch kein Code**
+Stand: 13.11.2026 · Status: **nur Plan, noch kein Code** · Fragen des Hosts beantwortet (13.11.2026)
 
 ## Ziel
 
@@ -36,7 +36,7 @@ Jeder Spieler bekommt einen eigenen Link mit eigenem Schlüssel, und dieser Schl
 ### Oberfläche
 - Spieler-Seiten: Die Auswahl „Playing as“ entfällt. Stattdessen steht fest „Du spielst: Mordos Feuerzunge“. Die Party-Eingabe hat nur diesen einen Namen.
 - Host-Seite (localhost): bleibt wie heute (alle Tabs, „Everybody“), dazu ein Bereich „Spieler-Links“ zum Erzeugen, Kopieren und Widerrufen.
-- Handys: bekommen ebenfalls einen persönlichen Link; `?char=` ohne Schlüssel bringt nichts mehr.
+- Handys: **keine persönlichen Links** (Entscheidung des Hosts, 13.11.2026). Gespielt wird nur am PC. `?char=` ohne Schlüssel bringt nichts mehr; die Handy-Ansicht bleibt höchstens als reine Leseansicht ohne Eingaben, Würfe und Geheimnachrichten.
 
 ### Übergang
 - Schalter `player_links: an|aus` in den Session Flags. Bei `an` öffnet der gemeinsame Spieler-Schlüssel nur noch die öffentliche Ansicht (Text, Karte), keine Eingaben, Würfe oder Geheimnachrichten.
@@ -72,8 +72,9 @@ Jeder Spieler bekommt einen eigenen Link mit eigenem Schlüssel, und dieser Schl
 3. Oberfläche: Link-Aufnahme aus dem Fragment, „Du spielst: …“, Host-Bereich, Playing-as entfernen.
 4. Übergang und Schalter, mit Tests 9 und 10; Probelauf mit drei Geräten über Tailscale.
 
-## Offene Fragen an den Host
+## Entscheidungen des Hosts (13.11.2026)
 
-- Sollen Handys auch persönliche Links bekommen oder vorerst wegfallen?
-- Wie werden die Links verteilt (z. B. einzeln per Discord-Direktnachricht)?
-- Soll ein Spieler mehrere Geräte mit demselben Link nutzen dürfen (z. B. Rechner + Handy)?
+- **Nur PCs, keine Handys.** Persönliche Links gibt es nur für Rechner.
+- **Verteilung:** Der Host schickt jedem Spieler seinen Link selbst per privater Nachricht. Das System verschickt nichts; `player_links.py create` zeigt den Link einmal im Terminal des Hosts an.
+- **Ein Gerät pro Spieler.** Ein Schlüssel bindet sich beim ersten Verbinden an genau ein Gerät (Geräte-Kennung aus der bestehenden Gerätefreigabe). Ein zweites Gerät mit demselben Link bekommt 403, und der Host sieht eine Warnung. Der Host kann einen Link **jederzeit widerrufen und neu ausstellen** (`player_links.py revoke` + `create`, oder `reissue` in einem Schritt); der alte Schlüssel ist sofort ungültig, offene Streams werden geschlossen.
+- Zusätzlicher Test 11: Zweites Gerät mit demselben Schlüssel ergibt 403; nach `reissue` funktioniert nur noch der neue Link.
